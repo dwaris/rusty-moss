@@ -36,7 +36,7 @@ impl EventHandler for Handler {
 }
 
 #[group]
-#[commands(covid, factorial, ping, pong, quit)]
+#[commands(covid, factorial, ping, pong, cat, dog, quit)]
 struct General;
 
 #[tokio::main]
