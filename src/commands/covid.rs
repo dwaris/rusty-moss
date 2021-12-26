@@ -109,15 +109,15 @@ pub async fn covid(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
 
 	fn summary(message: &mut String, response: &Corona) {
 		message.push_str(&format!("**Last Updated:** {}", &response.meta.lastUpdate[0..=9]));
-		message.push_str("\n");
+		message.push('\n');
 		cases(message, response);
-		message.push_str("\n");
+		message.push('\n');
 		deaths(message, response);
-		message.push_str("\n");
+		message.push('\n');
 		week_incidence(message, response);
-		message.push_str("\n");
+		message.push('\n');
 		incidence_7days(message, response);
-		message.push_str("\n");
+		message.push('\n');
 		r_value(message, response);
 	}
 

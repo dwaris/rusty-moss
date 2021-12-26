@@ -29,7 +29,7 @@ async fn cat(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 	if status_codes.contains(&code) {
 		msg.channel_id.say(&ctx.http, format!("https://http.cat/{}.jpg", code)).await?;
 	} else {
-		msg.channel_id.say(&ctx.http, format!("https://http.cat/404.jpg")).await?;
+		msg.channel_id.say(&ctx.http, "https://http.cat/404.jpg".to_string()).await?;
 	}
 
 	Ok(())
@@ -46,7 +46,7 @@ async fn dog(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 	if status_codes.contains(&code) {
 		msg.channel_id.say(&ctx.http, format!("https://httpstatusdogs.com/img/{}.jpg", code)).await?;
 	} else {
-		msg.channel_id.say(&ctx.http, format!("https://httpstatusdogs.com/img/404.jpg")).await?;
+		msg.channel_id.say(&ctx.http, "https://httpstatusdogs.com/img/404.jpg".to_string()).await?;
 	}
 
 	Ok(())
