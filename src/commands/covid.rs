@@ -60,7 +60,7 @@ async fn Germany(value: String) -> Result<String, Box<dyn std::error::Error>> {
 
     fn cases(message: &mut String, response: &Germany) {
         let value = response.delta.cases;
-        message.push_str(&format!("**New Infections:** {}", value));
+        message.push_str(&format!("**New Infections:** {value}"));
         if value < 10000 {
             message.push_str("  :blush:");
         } else if value < 20000 {
@@ -75,7 +75,7 @@ async fn Germany(value: String) -> Result<String, Box<dyn std::error::Error>> {
 
     fn deaths(message: &mut String, response: &Germany) {
         let value = response.delta.deaths;
-        message.push_str(&format!("**New Deaths:** {}", value));
+        message.push_str(&format!("**New Deaths:** {value}"));
         if value < 10 {
             message.push_str("  :blush:");
         } else if value < 50 {
@@ -90,7 +90,7 @@ async fn Germany(value: String) -> Result<String, Box<dyn std::error::Error>> {
 
     fn week_incidence(message: &mut String, response: &Germany) {
         let value = response.weekIncidence;
-        message.push_str(&format!("**Weekly Incidence:** {}", value));
+        message.push_str(&format!("**Weekly Incidence:** {value}"));
         if value < 30.0 {
             message.push_str("  :blush:");
         } else if value < 70.0 {
@@ -105,7 +105,7 @@ async fn Germany(value: String) -> Result<String, Box<dyn std::error::Error>> {
 
     fn incidence_7days(message: &mut String, response: &Germany) {
         let value = response.hospitalization.incidence7Days;
-        message.push_str(&format!("**Hospital Incidence:** {}", value));
+        message.push_str(&format!("**Hospital Incidence:** {value}"));
         if value < 3.0 {
             message.push_str("  :blush:");
         } else if value < 6.0 {
@@ -120,7 +120,7 @@ async fn Germany(value: String) -> Result<String, Box<dyn std::error::Error>> {
 
     fn r_value(message: &mut String, response: &Germany) {
         let value = response.r.rValue7Days.value;
-        message.push_str(&format!("**R-Value:** {}", value));
+        message.push_str(&format!("**R-Value:** {value}"));
         if value < 1.0 {
             message.push_str("  :blush:");
         } else if value < 2.0 {
@@ -192,13 +192,13 @@ async fn Landkreis(arg: String, value: String) -> Result<String, Box<dyn std::er
 
     fn cases(arg: &String, message: &mut String, response: &Landkreis) {
         let value = response.data[arg].delta.cases.to_u32().unwrap();
-        message.push_str(&format!("**New Infections:** {}", value));
+        message.push_str(&format!("**New Infections:** {value}"));
         message.push_str("\n");
     }
 
     fn deaths(arg: &String, message: &mut String, response: &Landkreis) {
         let value = response.data[arg].delta.deaths.to_i16().unwrap();
-        message.push_str(&format!("**New Deaths:** {}", value));
+        message.push_str(&format!("**New Deaths:** {value}"));
         if value < 10 {
             message.push_str("  :blush:");
         } else if value < 50 {
@@ -213,7 +213,7 @@ async fn Landkreis(arg: String, value: String) -> Result<String, Box<dyn std::er
 
     fn week_incidence(arg: &String, message: &mut String, response: &Landkreis) {
         let value = response.data[arg].weekIncidence.to_f32().unwrap();
-        message.push_str(&format!("**Weekly Incidence:** {}", value));
+        message.push_str(&format!("**Weekly Incidence:** {value}"));
         if value < 30.0 {
             message.push_str("  :blush:");
         } else if value < 70.0 {
