@@ -5,16 +5,34 @@ use serenity::model::prelude::*;
 use serenity::prelude::*;
 
 use serde::Deserialize;
+use std::collections::HashMap;
 
 #[command]
 pub async fn covid(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     #[derive(Deserialize, Debug)]
-    struct Corona {
+    struct Germany {
         delta: Delta,
         weekIncidence: f32,
         hospitalization: Hospital,
         r: RValue,
         meta: Meta,
+    }
+
+    #[derive(Deserialize, Debug)]
+    struct Landkreis {
+        data: HashMap<String, AGS>,
+        meta: Meta,
+    }
+
+    #[derive(Deserialize, Debug)]
+    struct AGS {
+        name: String,
+        state: String,
+        cases: u32,
+        deaths: u16,
+        weekIncidence: f32,
+        casesPer100k: f32,
+        delta: Delta,
     }
 
     #[derive(Deserialize, Debug)]
@@ -25,6 +43,11 @@ pub async fn covid(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
 
     #[derive(Deserialize, Debug)]
     struct RValue {
+        rValue7Days: RWeekValue,
+    }
+
+    #[derive(Deserialize, Debug)]
+    struct RWeekValue {
         value: f32,
     }
 
@@ -37,7 +60,7 @@ pub async fn covid(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
         lastUpdate: String,
     }
 
-    fn cases(message: &mut String, response: &Corona) {
+    fn cases(message: &mut String, response: &Germany) {
         let value = response.delta.cases;
         message.push_str(&format!("**New Infections:** {}", value));
         if value < 10000 {
@@ -51,7 +74,7 @@ pub async fn covid(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
         }
     }
 
-    fn deaths(message: &mut String, response: &Corona) {
+    fn deaths(message: &mut String, response: &Germany) {
         let value = response.delta.deaths;
         message.push_str(&format!("**New Deaths:** {}", value));
         if value < 10 {
@@ -65,7 +88,7 @@ pub async fn covid(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
         }
     }
 
-    fn week_incidence(message: &mut String, response: &Corona) {
+    fn week_incidence(message: &mut String, response: &Germany) {
         let value = response.weekIncidence;
         message.push_str(&format!("**Weekly Incidence:** {}", value));
         if value < 30.0 {
@@ -79,7 +102,7 @@ pub async fn covid(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
         }
     }
 
-    fn incidence_7days(message: &mut String, response: &Corona) {
+    fn incidence_7days(message: &mut String, response: &Germany) {
         let value = response.hospitalization.incidence7Days;
         message.push_str(&format!("**Hospital Incidence:** {}", value));
         if value < 3.0 {
@@ -93,8 +116,8 @@ pub async fn covid(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
         }
     }
 
-    fn r_value(message: &mut String, response: &Corona) {
-        let value = response.r.value;
+    fn r_value(message: &mut String, response: &Germany) {
+        let value = response.r.rValue7Days.value;
         message.push_str(&format!("**R-Value:** {}", value));
         if value < 1.0 {
             message.push_str("  :blush:");
@@ -105,7 +128,7 @@ pub async fn covid(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
         }
     }
 
-    fn summary(message: &mut String, response: &Corona) {
+    fn summary(message: &mut String, response: &Germany) {
         message.push_str(&format!(
             "**Last Updated:** {}",
             &response.meta.lastUpdate[0..=9]
@@ -122,26 +145,43 @@ pub async fn covid(ctx: &Context, msg: &Message, mut args: Args) -> CommandResul
         r_value(message, response);
     }
 
+    let arg = args.single::<String>()?;
     let value = args.single::<String>()?;
+
     let mut message = String::new();
-    let response = reqwest::get("https://api.corona-zahlen.org/germany/")
-        .await?
-        .json::<Corona>()
-        .await?;
 
-    match value.as_str() {
-        "c" => cases(&mut message, &response),
-        "d" => deaths(&mut message, &response),
-        "i" => week_incidence(&mut message, &response),
-        "h" => incidence_7days(&mut message, &response),
-        "r" => r_value(&mut message, &response),
-        "s" => summary(&mut message, &response),
-        _ => message.push_str(&format!(
-            "Invalid Request: `{}`! Try again with `c`, `d`, `i`, `h`, `r` or `s`:",
-            value
-        )),
-    };
+    if arg == "de".to_string() {
+        let response = reqwest::get("https://api.corona-zahlen.org/germany/")
+            .await?
+            .json::<Germany>()
+            .await?;
 
+        match value.as_str() {
+            "c" => cases(&mut message, &response),
+            "d" => deaths(&mut message, &response),
+            "i" => week_incidence(&mut message, &response),
+            "h" => incidence_7days(&mut message, &response),
+            "r" => r_value(&mut message, &response),
+            "s" => summary(&mut message, &response),
+            _ => message.push_str(&format!(
+                "Invalid Request: `{}`! Try again with `c`, `d`, `i`, `h`, `r` or `s`:",
+                value
+            )),
+        };
+    } else {
+        let response = reqwest::get("https://api.corona-zahlen.org/districts/")
+            .await?
+            .json::<Landkreis>()
+            .await?;
+
+        match value.as_str() {
+            "c" => message.push_str(response.data[&arg].cases.to_string().as_str()),
+            _ => message.push_str(&format!(
+                "Invalid Request: `{}`! Try again with `c`, `d`, `i`, `h`, `r` or `s`:",
+                value
+            )),
+        }
+    }
     msg.channel_id.say(&ctx.http, message).await?;
 
     Ok(())
