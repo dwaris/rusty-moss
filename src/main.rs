@@ -1,84 +1,89 @@
 mod commands;
+use commands::{fun, utility};
 
-use std::{collections::HashSet, env, sync::Arc};
+use dotenvy::dotenv;
+use env_logger::Env;
+use poise::serenity_prelude as serenity;
+use std::{collections::HashMap, env, sync::Mutex};
 
-use commands::{covid::*, math::*, meta::*, owner::*};
-use serenity::{
-    async_trait,
-    client::bridge::gateway::ShardManager,
-    framework::{standard::macros::group, StandardFramework},
-    http::Http,
-    model::{event::ResumedEvent, gateway::Ready},
-    prelude::*,
-};
-use tracing::{error, info};
+type Error = Box<dyn std::error::Error + Send + Sync>;
+type Context<'a> = poise::Context<'a, Data, Error>; // Custom Context struct to store votes
 
-pub struct ShardManagerContainer;
-
-impl TypeMapKey for ShardManagerContainer {
-    type Value = Arc<Mutex<ShardManager>>;
+// Custom Data struct to store votes
+pub struct Data {
+    votes: Mutex<HashMap<String, u32>>,
 }
 
-struct Handler;
-
-#[async_trait]
-impl EventHandler for Handler {
-    async fn ready(&self, _: Context, ready: Ready) {
-        info!("{} is connected!", ready.user.name);
-    }
-
-    async fn resume(&self, _: Context, _: ResumedEvent) {
-        info!("Resumed");
+async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
+    // stolen from example
+    match error {
+        poise::FrameworkError::Setup { error, .. } => panic!("Failed to start bot: {:?}", error),
+        poise::FrameworkError::Command { error, ctx } => {
+            println!("Error in command `{}`: {:?}", ctx.command().name, error,);
+        }
+        error => {
+            if let Err(e) = poise::builtins::on_error(error).await {
+                println!("Error while handling error: {}", e)
+            }
+        }
     }
 }
-
-#[group]
-#[commands(covid, factorial, ping, pong, cat, dog, quit)]
-struct General;
 
 #[tokio::main]
 async fn main() {
-    dotenv::dotenv().expect("Failed to load .env file");
+    dotenv().ok(); //Load .env file
 
-    tracing_subscriber::fmt::init();
+    env_logger::init_from_env(Env::default().filter_or("RUST_LOG", "info")); //Initialize logger based on RUST_LOG environment variable
 
-    let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
+    let token = env::var("DISCORD_TOKEN").expect("No discord token found in environment variables"); //Get discord token from environment variables
 
-    let http = Http::new_with_token(&token);
+    let options = poise::FrameworkOptions {
+        // Add all commands to the framework
+        commands: vec![
+            fun::ping::ping(),
+            fun::ping::pong(),
+            utility::vote::vote(),
+            utility::vote::getvotes(),
+            utility::help::help(),
+        ],
 
-    let (owners, _bot_id) = match http.get_current_application_info().await {
-        Ok(info) => {
-            let mut owners = HashSet::new();
-            owners.insert(info.owner.id);
+        //DEBUG OUTPUT ON CONSOLE
+        on_error: |error| Box::pin(on_error(error)),
 
-            (owners, info.id)
-        }
-        Err(why) => panic!("Could not access application info: {:?}", why),
+        pre_command: |ctx| {
+            Box::pin(async move {
+                println!("Executing command {}...", ctx.command().qualified_name);
+            })
+        },
+
+        post_command: |ctx| {
+            Box::pin(async move {
+                println!("Executed command {}!", ctx.command().qualified_name);
+            })
+        },
+        skip_checks_for_owners: false,
+        event_handler: |_ctx, event, _framework, _data| {
+            Box::pin(async move {
+                println!("Got an event in event handler: {:?}", event.name());
+                Ok(())
+            })
+        },
+        ..Default::default() //DEBUG
     };
 
-    let framework = StandardFramework::new()
-        .configure(|c| c.owners(owners).prefix("~"))
-        .group(&GENERAL_GROUP);
-    let mut client = Client::builder(&token)
-        .framework(framework)
+    poise::Framework::builder()
+        .token(token)
+        .setup(move |ctx, _ready, framework| {
+            Box::pin(async move {
+                poise::builtins::register_globally(ctx, &framework.options().commands).await?; //Register all commands globally (for all guilds)
+                Ok(Data {
+                    votes: Mutex::new(HashMap::new()), //Initialize the votes hashmap
+                })
+            })
+        })
+        .options(options)
+        .intents(serenity::GatewayIntents::non_privileged())
+        .run()
         .await
-        .expect("Err creating client");
-
-    {
-        let mut data = client.data.write().await;
-        data.insert::<ShardManagerContainer>(Arc::clone(&client.shard_manager));
-    }
-
-    let shard_manager = Arc::clone(&client.shard_manager);
-
-    tokio::spawn(async move {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("Error awaiting CTRL+C");
-        shard_manager.lock().await.shutdown_all().await;
-    });
-
-    if let Err(why) = client.start().await {
-        error!("Client error: {:?}", why);
-    }
+        .unwrap();
 }
