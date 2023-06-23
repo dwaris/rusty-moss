@@ -43,7 +43,8 @@ async fn main() {
             fun::ping::ping(),
             fun::ping::pong(),
             utility::vote::vote(),
-            utility::vote::getvotes(),
+            utility::vote::get_votes(),
+            utility::vote::reset_votes(),
             utility::help::help(),
         ],
         prefix_options: poise::PrefixFrameworkOptions {
