@@ -1,15 +1,16 @@
 use crate::{Context, Error};
 
-#[poise::command(prefix_command, slash_command, category = "Fun", user_cooldown = "5")]
+/// Replies with pong
+#[poise::command(prefix_command, track_edits, slash_command,  category = "Fun")]
 pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
-    ctx.send(|e| e.content(format!("pong"))).await?;
+    ctx.send(|e| e.content("pong".to_string())).await?;
 
     Ok(())
 }
 
-#[poise::command(prefix_command, slash_command, category = "Fun", user_cooldown = "5")]
+/// Replies with ping
+#[poise::command(prefix_command, track_edits, slash_command, category = "Fun")]
 pub async fn pong(ctx: Context<'_>) -> Result<(), Error> {
-    ctx.send(|e| e.content(format!("ping"))).await?;
-
+    ctx.send(|e| e.content("ping".to_string())).await?;
     Ok(())
 }
