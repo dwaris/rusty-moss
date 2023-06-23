@@ -46,6 +46,10 @@ async fn main() {
             utility::vote::getvotes(),
             utility::help::help(),
         ],
+        prefix_options: poise::PrefixFrameworkOptions {
+            prefix: Some("~".into()),
+            ..Default::default()
+        },
 
         //DEBUG OUTPUT ON CONSOLE
         on_error: |error| Box::pin(on_error(error)),
@@ -72,7 +76,11 @@ async fn main() {
     };
 
     poise::Framework::builder()
+        .options(options)
         .token(token)
+        .intents(
+            serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT,
+        )
         .setup(move |ctx, _ready, framework| {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?; //Register all commands globally (for all guilds)
@@ -81,8 +89,7 @@ async fn main() {
                 })
             })
         })
-        .options(options)
-        .intents(serenity::GatewayIntents::non_privileged())
+
         .run()
         .await
         .unwrap();
