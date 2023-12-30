@@ -13,17 +13,9 @@ env_logger = "0.10"
 
 [dependencies.tokio]
 version = "1.28"
-features = ["macros", "signal", "rt-multi-thread"]
+features = ["macros", "rt-multi-thread"]
 
 [dependencies.serenity]
 default-features = false
-features = [
-    "builder",
-    "client",
-    "gateway",
-    "rustls_backend",
-    "model",
-    "utils",
-    "collector",
-]
+features = ["builder", "client", "gateway", "rustls_backend"]
 version = "0.12"
