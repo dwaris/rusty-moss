@@ -12,7 +12,7 @@ dotenvy = "0.15"
 env_logger = "0.10"
 
 [dependencies.tokio]
-version = "1.28"
+version = "1.38"
 features = ["macros", "rt-multi-thread"]
 
 [dependencies.serenity]
