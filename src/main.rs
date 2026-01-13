@@ -15,10 +15,12 @@ pub struct Data {
 }
 
 async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
-    // stolen from example
+    // This is our custom error handler
+    // They are many errors that can occur, so we only handle the ones we want to customize
+    // and forward the rest to the default handler
     match error {
         poise::FrameworkError::Setup { error, .. } => panic!("Failed to start bot: {:?}", error),
-        poise::FrameworkError::Command { error, ctx } => {
+        poise::FrameworkError::Command { error, ctx, .. } => {
             println!("Error in command `{}`: {:?}", ctx.command().name, error,);
         }
         error => {
@@ -34,8 +36,6 @@ async fn main() {
     dotenv().ok(); //Load .env file
 
     env_logger::init_from_env(Env::default().filter_or("RUST_LOG", "info")); //Initialize logger based on RUST_LOG environment variable
-
-    let token = env::var("DISCORD_TOKEN").expect("No discord token found in environment variables"); //Get discord token from environment variables
 
     let options = poise::FrameworkOptions {
         // Add all commands to the framework
@@ -69,29 +69,37 @@ async fn main() {
         skip_checks_for_owners: false,
         event_handler: |_ctx, event, _framework, _data| {
             Box::pin(async move {
-                println!("Got an event in event handler: {:?}", event.name());
+                println!(
+                    "Got an event in event handler: {:?}",
+                    event.snake_case_name()
+                );
                 Ok(())
             })
         },
-        ..Default::default() //DEBUG
+        ..Default::default()
     };
 
-    poise::Framework::builder()
-        .options(options)
-        .token(token)
-        .intents(
-            serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT,
-        )
+    let framework = poise::Framework::builder()
         .setup(move |ctx, _ready, framework| {
             Box::pin(async move {
-                poise::builtins::register_globally(ctx, &framework.options().commands).await?; //Register all commands globally (for all guilds)
+                println!("Logged in as {}", _ready.user.name);
+                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 Ok(Data {
-                    votes: Mutex::new(HashMap::new()), //Initialize the votes hashmap
+                    votes: Mutex::new(HashMap::new()),
                 })
             })
         })
+        .options(options)
+        .build();
 
-        .run()
-        .await
-        .unwrap();
+    let token: String = env::var("DISCORD_TOKEN").expect("No discord token found in environment variables"); //Get discord token from environment variables
+    let intents =
+        serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
+
+    let client = serenity::ClientBuilder::new(token, intents)
+        .framework(framework)
+        .await;
+
+    client.unwrap().start().await.unwrap()
+
 }
