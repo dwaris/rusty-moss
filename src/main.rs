@@ -1,5 +1,5 @@
 mod commands;
-use commands::{fun, utility};
+use commands::{fun, utility, warframe};
 
 use dotenvy::dotenv;
 use env_logger::Env;
@@ -35,6 +35,8 @@ async fn main() {
         commands: vec![
             fun::ping::ping(),
             utility::help::help(),
+            warframe::relic::relic(),
+            warframe::farm::farm(),
         ],
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some("~".into()),
