@@ -7,9 +7,16 @@ pub async fn ping(ctx: Context<'_>) -> Result<(), Error> {
     let started_at = Instant::now();
     let reply = ctx.say("Pinging...").await?;
 
-    let response_time = started_at.elapsed().as_millis();
+    let api_latency_ms = started_at.elapsed().as_millis();
+    let gateway_latency = ctx.ping().await.as_millis();
+
     reply
-        .edit(ctx, poise::CreateReply::default().content(format!("Bot response time: {response_time}ms")))
+        .edit(
+            ctx,
+            poise::CreateReply::default().content(format!(
+                "Pong!\nAPI latency: {api_latency_ms}ms\nGateway latency: {gateway_latency}ms"
+            )),
+        )
         .await?;
 
     Ok(())
