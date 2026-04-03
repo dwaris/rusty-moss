@@ -1,4 +1,5 @@
 use crate::{Context, Error};
+use super::api::get_cached_json;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
@@ -62,18 +63,15 @@ pub async fn relic(
 ) -> Result<(), Error> {
     ctx.defer().await?;
 
-    let client = reqwest::Client::new();
-    let response = client
-        .get("https://drops.warframestat.us/data/relics.json")
-        .send()
-        .await?;
+    let payload = match get_cached_json(&ctx, "https://drops.warframestat.us/data/relics.json").await {
+        Ok(payload) => payload,
+        Err(_) => {
+            ctx.say("Failed to fetch relic data from API").await?;
+            return Ok(());
+        }
+    };
 
-    if !response.status().is_success() {
-        ctx.say("Failed to fetch relic data from API").await?;
-        return Ok(());
-    }
-
-    let relics: RelicResponse = response.json().await?;
+    let relics: RelicResponse = serde_json::from_value(payload)?;
 
     // Search for relics containing the item
     let mut found_relics: Vec<FoundRelic> = Vec::new();

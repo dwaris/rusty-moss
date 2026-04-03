@@ -1,4 +1,5 @@
 use crate::{Context, Error};
+use super::api::get_cached_json;
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -96,18 +97,15 @@ pub async fn farm(
     let relic_name = format!("{} Relic", normalized_relic);
     let search_term = relic_name.to_lowercase();
 
-    let client = reqwest::Client::new();
-    let response = client
-        .get("https://drops.warframestat.us/data/missionRewards.json")
-        .send()
-        .await?;
+    let payload = match get_cached_json(&ctx, "https://drops.warframestat.us/data/missionRewards.json").await {
+        Ok(payload) => payload,
+        Err(_) => {
+            ctx.say("Failed to fetch mission data from API").await?;
+            return Ok(());
+        }
+    };
 
-    if !response.status().is_success() {
-        ctx.say("❌ Failed to fetch mission data from API").await?;
-        return Ok(());
-    }
-
-    let api_response: ApiResponse = response.json().await?;
+    let api_response: ApiResponse = serde_json::from_value(payload)?;
 
     // Search for missions that drop the relic
     let mut found_missions: Vec<(String, String, String, String, f64)> = Vec::new();

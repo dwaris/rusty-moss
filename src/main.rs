@@ -4,13 +4,28 @@ use commands::{fun, utility, warframe};
 use dotenvy::dotenv;
 use env_logger::Env;
 use poise::serenity_prelude as serenity;
+use std::collections::HashMap;
 use std::env;
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
-type Context<'a> = poise::Context<'a, (), Error>;
+type Context<'a> = poise::Context<'a, BotData, Error>;
+
+#[derive(Clone)]
+struct CachedPayload {
+    fetched_at: Instant,
+    payload: serde_json::Value,
+}
+
+pub struct BotData {
+    http_client: reqwest::Client,
+    warframe_cache: RwLock<HashMap<String, CachedPayload>>,
+    warframe_cache_ttl: Duration,
+}
 
 
-async fn on_error(error: poise::FrameworkError<'_, (), Error>) {
+async fn on_error(error: poise::FrameworkError<'_, BotData, Error>) {
     match error {
         poise::FrameworkError::Setup { error, .. } => panic!("Failed to start bot: {:?}", error),
         poise::FrameworkError::Command { error, ctx, .. } => {
@@ -75,7 +90,17 @@ async fn main() {
             Box::pin(async move {
                 println!("Logged in as {}", _ready.user.name);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                Ok(())
+
+                let http_client = reqwest::Client::builder()
+                    .timeout(Duration::from_secs(12))
+                    .user_agent("rusty-moss/0.2.0")
+                    .build()?;
+
+                Ok(BotData {
+                    http_client,
+                    warframe_cache: RwLock::new(HashMap::new()),
+                    warframe_cache_ttl: Duration::from_secs(120),
+                })
             })
         })
         .options(options)
