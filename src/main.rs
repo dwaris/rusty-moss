@@ -4,20 +4,13 @@ use commands::{fun, utility};
 use dotenvy::dotenv;
 use env_logger::Env;
 use poise::serenity_prelude as serenity;
-use std::{collections::HashMap, env, sync::Mutex};
+use std::env;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
-type Context<'a> = poise::Context<'a, Data, Error>; // Custom Context struct to store votes
+type Context<'a> = poise::Context<'a, (), Error>;
 
-// Custom Data struct to store votes
-pub struct Data {
-    votes: Mutex<HashMap<String, u32>>,
-}
 
-async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
-    // This is our custom error handler
-    // They are many errors that can occur, so we only handle the ones we want to customize
-    // and forward the rest to the default handler
+async fn on_error(error: poise::FrameworkError<'_, (), Error>) {
     match error {
         poise::FrameworkError::Setup { error, .. } => panic!("Failed to start bot: {:?}", error),
         poise::FrameworkError::Command { error, ctx, .. } => {
@@ -41,10 +34,6 @@ async fn main() {
         // Add all commands to the framework
         commands: vec![
             fun::ping::ping(),
-            fun::ping::pong(),
-            utility::vote::vote(),
-            utility::vote::get_votes(),
-            utility::vote::reset_votes(),
             utility::help::help(),
         ],
         prefix_options: poise::PrefixFrameworkOptions {
@@ -84,9 +73,7 @@ async fn main() {
             Box::pin(async move {
                 println!("Logged in as {}", _ready.user.name);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                Ok(Data {
-                    votes: Mutex::new(HashMap::new()),
-                })
+                Ok(())
             })
         })
         .options(options)
