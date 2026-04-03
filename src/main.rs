@@ -11,6 +11,9 @@ use tokio::sync::RwLock;
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, BotData, Error>;
+const WARFRAME_CACHE_TTL_SECS: u64 = 120;
+const HTTP_TIMEOUT_SECS: u64 = 12;
+const DEFAULT_PREFIX: &str = "~";
 
 #[derive(Clone)]
 struct CachedPayload {
@@ -22,6 +25,80 @@ pub struct BotData {
     http_client: reqwest::Client,
     warframe_cache: RwLock<HashMap<String, CachedPayload>>,
     warframe_cache_ttl: Duration,
+}
+
+fn build_bot_data() -> Result<BotData, Error> {
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .build()?;
+
+    Ok(BotData {
+        http_client,
+        warframe_cache: RwLock::new(HashMap::new()),
+        warframe_cache_ttl: Duration::from_secs(WARFRAME_CACHE_TTL_SECS),
+    })
+}
+
+fn framework_commands() -> Vec<poise::Command<BotData, Error>> {
+    vec![
+        fun::ping::ping(),
+        utility::help::help(),
+        warframe::relic::relic(),
+        warframe::farm::farm(),
+    ]
+}
+
+fn build_framework_options() -> poise::FrameworkOptions<BotData, Error> {
+    poise::FrameworkOptions {
+        commands: framework_commands(),
+        prefix_options: poise::PrefixFrameworkOptions {
+            prefix: Some(DEFAULT_PREFIX.into()),
+            ..Default::default()
+        },
+        on_error: |error| Box::pin(on_error(error)),
+        pre_command: |ctx| {
+            Box::pin(async move {
+                println!("Executing command {}...", ctx.command().qualified_name);
+            })
+        },
+        post_command: |ctx| {
+            Box::pin(async move {
+                println!("Executed command {}!", ctx.command().qualified_name);
+            })
+        },
+        skip_checks_for_owners: false,
+        event_handler: |_ctx, event, _framework, _data| {
+            Box::pin(async move {
+                println!(
+                    "Got an event in event handler: {:?}",
+                    event.snake_case_name()
+                );
+                Ok(())
+            })
+        },
+        ..Default::default()
+    }
+}
+
+fn build_framework() -> poise::Framework<BotData, Error> {
+    poise::Framework::builder()
+        .setup(move |ctx, ready, framework| {
+            Box::pin(async move {
+                println!("Logged in as {}", ready.user.name);
+                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
+                build_bot_data()
+            })
+        })
+        .options(build_framework_options())
+        .build()
+}
+
+fn discord_intents() -> serenity::GatewayIntents {
+    serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT
+}
+
+fn discord_token() -> String {
+    env::var("DISCORD_TOKEN").expect("No discord token found in environment variables")
 }
 
 
@@ -41,79 +118,15 @@ async fn on_error(error: poise::FrameworkError<'_, BotData, Error>) {
 
 #[tokio::main]
 async fn main() {
-    dotenv().ok(); //Load .env file
+    dotenv().ok();
+    env_logger::init_from_env(Env::default().filter_or("RUST_LOG", "info"));
 
-    env_logger::init_from_env(Env::default().filter_or("RUST_LOG", "info")); //Initialize logger based on RUST_LOG environment variable
+    let framework = build_framework();
+    let token = discord_token();
 
-    let options = poise::FrameworkOptions {
-        // Add all commands to the framework
-        commands: vec![
-            fun::ping::ping(),
-            utility::help::help(),
-            warframe::relic::relic(),
-            warframe::farm::farm(),
-        ],
-        prefix_options: poise::PrefixFrameworkOptions {
-            prefix: Some("~".into()),
-            ..Default::default()
-        },
-
-        //DEBUG OUTPUT ON CONSOLE
-        on_error: |error| Box::pin(on_error(error)),
-
-        pre_command: |ctx| {
-            Box::pin(async move {
-                println!("Executing command {}...", ctx.command().qualified_name);
-            })
-        },
-
-        post_command: |ctx| {
-            Box::pin(async move {
-                println!("Executed command {}!", ctx.command().qualified_name);
-            })
-        },
-        skip_checks_for_owners: false,
-        event_handler: |_ctx, event, _framework, _data| {
-            Box::pin(async move {
-                println!(
-                    "Got an event in event handler: {:?}",
-                    event.snake_case_name()
-                );
-                Ok(())
-            })
-        },
-        ..Default::default()
-    };
-
-    let framework = poise::Framework::builder()
-        .setup(move |ctx, _ready, framework| {
-            Box::pin(async move {
-                println!("Logged in as {}", _ready.user.name);
-                poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-
-                let http_client = reqwest::Client::builder()
-                    .timeout(Duration::from_secs(12))
-                    .user_agent("rusty-moss/0.2.0")
-                    .build()?;
-
-                Ok(BotData {
-                    http_client,
-                    warframe_cache: RwLock::new(HashMap::new()),
-                    warframe_cache_ttl: Duration::from_secs(120),
-                })
-            })
-        })
-        .options(options)
-        .build();
-
-    let token: String = env::var("DISCORD_TOKEN").expect("No discord token found in environment variables"); //Get discord token from environment variables
-    let intents =
-        serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
-
-    let client = serenity::ClientBuilder::new(token, intents)
+    let client = serenity::ClientBuilder::new(token, discord_intents())
         .framework(framework)
         .await;
 
-    client.unwrap().start().await.unwrap()
-
+    client.unwrap().start().await.unwrap();
 }

@@ -1,9 +1,13 @@
-use crate::{Context, Error};
 use super::api::get_cached_json;
+use crate::{Context, Error};
 use poise::serenity_prelude as serenity;
 use serde::Deserialize;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::time::Duration;
+
+type RotationDrop = (String, String, f64);
+type MissionDrops = (String, Vec<RotationDrop>);
 
 #[derive(Deserialize, Debug)]
 struct ApiResponse {
@@ -31,6 +35,15 @@ enum MissionRewards {
 struct MissionReward {
     #[serde(rename = "itemName")]
     item_name: String,
+    rarity: String,
+    chance: f64,
+}
+
+#[derive(Debug)]
+struct FoundDrop {
+    mission_path: String,
+    game_mode: String,
+    rotation: String,
     rarity: String,
     chance: f64,
 }
@@ -71,11 +84,90 @@ fn page_components(current_page: usize, total_pages: usize) -> Vec<serenity::Cre
     vec![serenity::CreateActionRow::Buttons(vec![prev_button, next_button])]
 }
 
+fn collect_found_drops(api_response: ApiResponse, search_term: &str) -> Vec<FoundDrop> {
+    let mut found = Vec::new();
+
+    for (planet, missions) in api_response.mission_rewards {
+        for (mission_name, mission_data) in missions {
+            if mission_data.is_event.unwrap_or(false) {
+                continue;
+            }
+
+            let mission_path = format!("{}/{}", planet, mission_name);
+
+            match &mission_data.rewards {
+                MissionRewards::Rotations(rewards_by_rotation) => {
+                    for (rotation, rewards) in rewards_by_rotation {
+                        for reward in rewards {
+                            if reward.item_name.to_lowercase().starts_with(search_term) {
+                                found.push(FoundDrop {
+                                    mission_path: mission_path.clone(),
+                                    game_mode: mission_data.game_mode.clone(),
+                                    rotation: rotation.clone(),
+                                    rarity: reward.rarity.clone(),
+                                    chance: reward.chance,
+                                });
+                            }
+                        }
+                    }
+                }
+                MissionRewards::List(rewards) => {
+                    for reward in rewards {
+                        if reward.item_name.to_lowercase().starts_with(search_term) {
+                            found.push(FoundDrop {
+                                mission_path: mission_path.clone(),
+                                game_mode: mission_data.game_mode.clone(),
+                                rotation: "Any".to_string(),
+                                rarity: reward.rarity.clone(),
+                                chance: reward.chance,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    found
+}
+
+fn group_and_sort_missions(found_drops: Vec<FoundDrop>) -> Vec<MissionDrops> {
+    let mut mission_map: HashMap<String, Vec<RotationDrop>> = HashMap::new();
+
+    for drop in found_drops {
+        let mission_label = format!("{} [{}]", drop.mission_path, drop.game_mode);
+        mission_map
+            .entry(mission_label)
+            .or_default()
+            .push((drop.rotation, drop.rarity, drop.chance));
+    }
+
+    for drops in mission_map.values_mut() {
+        drops.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(Ordering::Equal));
+    }
+
+    let mut missions: Vec<MissionDrops> = mission_map.into_iter().collect();
+    missions.sort_by(|a, b| {
+        let best_a = a.1.iter().map(|x| x.2).fold(0.0, f64::max);
+        let best_b = b.1.iter().map(|x| x.2).fold(0.0, f64::max);
+        best_b.partial_cmp(&best_a).unwrap_or(Ordering::Equal)
+    });
+
+    missions
+}
+
+fn paginate_missions(missions: Vec<MissionDrops>, page_size: usize) -> Vec<Vec<MissionDrops>> {
+    missions
+        .chunks(page_size)
+        .map(|chunk| chunk.to_vec())
+        .collect()
+}
+
 fn format_page(
     relic_name: &str,
     current_page: usize,
     total_pages: usize,
-    missions: &[(String, Vec<(String, String, f64)>)],
+    missions: &[MissionDrops],
 ) -> String {
     let mut response_text = format!(
         "Best missions to farm {} (Page {}/{}):\n\n",
@@ -101,6 +193,54 @@ fn format_page(
     }
 
     response_text
+}
+
+async fn handle_page_interactions(
+    ctx: Context<'_>,
+    mut message: serenity::Message,
+    relic_name: &str,
+    total_pages: usize,
+    pages: &[Vec<MissionDrops>],
+    current_page: &mut usize,
+) -> Result<(), Error> {
+    while let Some(interaction) = serenity::collector::ComponentInteractionCollector::new(ctx.serenity_context())
+        .author_id(ctx.author().id)
+        .channel_id(ctx.channel_id())
+        .message_id(message.id)
+        .timeout(Duration::from_secs(120))
+        .await
+    {
+        match interaction.data.custom_id.as_str() {
+            "farm_prev" if *current_page > 0 => *current_page -= 1,
+            "farm_next" if *current_page + 1 < total_pages => *current_page += 1,
+            _ => {}
+        }
+
+        interaction
+            .create_response(
+                ctx.serenity_context(),
+                serenity::CreateInteractionResponse::UpdateMessage(
+                    serenity::CreateInteractionResponseMessage::new()
+                        .content(format_page(
+                            relic_name,
+                            *current_page,
+                            total_pages,
+                            &pages[*current_page],
+                        ))
+                        .components(page_components(*current_page, total_pages)),
+                ),
+            )
+            .await?;
+    }
+
+    message
+        .edit(
+            ctx.serenity_context(),
+            serenity::EditMessage::new().components(Vec::new()),
+        )
+        .await?;
+
+    Ok(())
 }
 
 /// Find the best missions to farm a specific relic
@@ -136,52 +276,9 @@ pub async fn farm(
 
     let api_response: ApiResponse = serde_json::from_value(payload)?;
 
-    // Search for missions that drop the relic
-    let mut found_missions: Vec<(String, String, String, String, f64)> = Vec::new();
+    let mut found_drops = collect_found_drops(api_response, &search_term);
 
-    for (planet, missions) in api_response.mission_rewards {
-        for (mission_name, mission_data) in missions {
-            // Skip event missions
-            if mission_data.is_event.unwrap_or(false) {
-                continue;
-            }
-
-            let full_mission_name = format!("{}/{}", planet, mission_name);
-
-            match &mission_data.rewards {
-                MissionRewards::Rotations(rewards_by_rotation) => {
-                    for (rotation, rewards) in rewards_by_rotation {
-                        for reward in rewards {
-                            if reward.item_name.to_lowercase().starts_with(&search_term) {
-                                found_missions.push((
-                                    full_mission_name.clone(),
-                                    mission_data.game_mode.clone(),
-                                    rotation.clone(),
-                                    reward.rarity.clone(),
-                                    reward.chance,
-                                ));
-                            }
-                        }
-                    }
-                }
-                MissionRewards::List(rewards) => {
-                    for reward in rewards {
-                        if reward.item_name.to_lowercase().starts_with(&search_term) {
-                            found_missions.push((
-                                full_mission_name.clone(),
-                                mission_data.game_mode.clone(),
-                                "Any".to_string(),
-                                reward.rarity.clone(),
-                                reward.chance,
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if found_missions.is_empty() {
+    if found_drops.is_empty() {
         ctx.say(format!(
             "❌ No missions found that drop **{}**\n\nMake sure to use the format: 'Lith A1', 'Meso B5', 'Neo Z8', or 'Axi S9'. If the format is correct, this relic may not be in the current drop table.",
             relic_name
@@ -190,44 +287,25 @@ pub async fn farm(
         return Ok(());
     }
 
-    // Sort by drop chance (highest first)
-    found_missions.sort_by(|a, b| b.4.partial_cmp(&a.4).unwrap());
+    found_drops.sort_by(|a, b| b.chance.partial_cmp(&a.chance).unwrap_or(Ordering::Equal));
 
-    // Group by mission and show best rotation
-    let mut mission_map: HashMap<String, Vec<(String, String, f64)>> = HashMap::new();
-    for (mission, game_mode, rotation, rarity, chance) in found_missions {
-        mission_map
-            .entry(format!("{} [{}]", mission, game_mode))
-            .or_insert_with(Vec::new)
-            .push((rotation, rarity, chance));
-    }
-
-    let mut sorted_missions: Vec<_> = mission_map.into_iter().collect();
-    sorted_missions.sort_by(|a, b| {
-        let max_a = a.1.iter().map(|x| x.2).fold(0.0, f64::max);
-        let max_b = b.1.iter().map(|x| x.2).fold(0.0, f64::max);
-        max_b.partial_cmp(&max_a).unwrap()
-    });
+    let sorted_missions = group_and_sort_missions(found_drops);
 
     let page_size = 10;
-    let total_pages = sorted_missions.len().div_ceil(page_size);
-
-    let clamped_page = requested_page.min(total_pages);
-    let initial_page_index = clamped_page - 1;
-
-    let pages: Vec<Vec<(String, Vec<(String, String, f64)>)>> = sorted_missions
-        .chunks(page_size)
-        .map(|chunk| chunk.to_vec())
-        .collect();
+    let pages = paginate_missions(sorted_missions, page_size);
 
     if pages.is_empty() {
         ctx.say("No mission pages available.").await?;
         return Ok(());
     }
 
+    let total_pages = pages.len();
+    let clamped_page = requested_page.min(total_pages);
+    let initial_page_index = clamped_page - 1;
+
     let mut current_page = initial_page_index;
 
-    let mut message = ctx
+    let message = ctx
         .channel_id()
         .send_message(
             ctx.serenity_context(),
@@ -243,42 +321,15 @@ pub async fn farm(
         .await?;
 
     if total_pages > 1 {
-        while let Some(interaction) = serenity::collector::ComponentInteractionCollector::new(ctx.serenity_context())
-            .author_id(ctx.author().id)
-            .channel_id(ctx.channel_id())
-            .message_id(message.id)
-            .timeout(Duration::from_secs(120))
-            .await
-        {
-            match interaction.data.custom_id.as_str() {
-                "farm_prev" if current_page > 0 => current_page -= 1,
-                "farm_next" if current_page + 1 < total_pages => current_page += 1,
-                _ => {}
-            }
-
-            interaction
-                .create_response(
-                    ctx.serenity_context(),
-                    serenity::CreateInteractionResponse::UpdateMessage(
-                        serenity::CreateInteractionResponseMessage::new()
-                            .content(format_page(
-                                &relic_name,
-                                current_page,
-                                total_pages,
-                                &pages[current_page],
-                            ))
-                            .components(page_components(current_page, total_pages)),
-                    ),
-                )
-                .await?;
-        }
-
-        message
-            .edit(
-                ctx.serenity_context(),
-                serenity::EditMessage::new().components(Vec::new()),
-            )
-            .await?;
+        handle_page_interactions(
+            ctx,
+            message,
+            &relic_name,
+            total_pages,
+            &pages,
+            &mut current_page,
+        )
+        .await?;
     }
 
     Ok(())
