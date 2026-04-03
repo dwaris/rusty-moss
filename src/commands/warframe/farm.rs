@@ -1,7 +1,9 @@
 use crate::{Context, Error};
 use super::api::get_cached_json;
+use poise::serenity_prelude as serenity;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::time::Duration;
 
 #[derive(Deserialize, Debug)]
 struct ApiResponse {
@@ -55,40 +57,67 @@ fn normalize_relic_name(input: &str) -> Option<String> {
     Some(format!("{} {}", normalized_tier, code.to_ascii_uppercase()))
 }
 
-fn parse_relic_and_page(input: &str) -> (String, usize) {
-    let trimmed = input.trim();
-    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+fn page_components(current_page: usize, total_pages: usize) -> Vec<serenity::CreateActionRow> {
+    let prev_button = serenity::CreateButton::new("farm_prev")
+        .label("Previous")
+        .style(serenity::ButtonStyle::Primary)
+        .disabled(current_page == 0);
 
-    if parts.len() >= 4 {
-        let last = parts[parts.len() - 1];
-        let prev = parts[parts.len() - 2];
+    let next_button = serenity::CreateButton::new("farm_next")
+        .label("Next")
+        .style(serenity::ButtonStyle::Primary)
+        .disabled(current_page + 1 >= total_pages);
 
-        if prev.eq_ignore_ascii_case("page") {
-            if let Ok(page) = last.parse::<usize>() {
-                if page > 0 {
-                    let relic = parts[..parts.len() - 2].join(" ");
-                    return (relic, page);
-                }
-            }
+    vec![serenity::CreateActionRow::Buttons(vec![prev_button, next_button])]
+}
+
+fn format_page(
+    relic_name: &str,
+    current_page: usize,
+    total_pages: usize,
+    missions: &[(String, Vec<(String, String, f64)>)],
+) -> String {
+    let mut response_text = format!(
+        "Best missions to farm {} (Page {}/{}):\n\n",
+        relic_name,
+        current_page + 1,
+        total_pages
+    );
+
+    for (mission, rotations) in missions {
+        response_text.push_str(&format!("{}\n", mission));
+
+        for (rotation, rarity, chance) in rotations {
+            response_text.push_str(&format!(
+                "  Rotation {} - {}: {:.2}%\n",
+                rotation, rarity, chance
+            ));
         }
+        response_text.push('\n');
     }
 
-    (trimmed.to_string(), 1)
+    if total_pages > 1 {
+        response_text.push_str("Use the buttons below to change pages.");
+    }
+
+    response_text
 }
 
 /// Find the best missions to farm a specific relic
 #[poise::command(slash_command, prefix_command, category = "Warframe")]
 pub async fn farm(
     ctx: Context<'_>,
+    #[description = "Result page number (default 1)"]
+    page: Option<usize>,
     #[description = "Relic to farm (e.g., 'Lith A1' or 'Axi S9')"]
     #[rest]
     relic: String,
 ) -> Result<(), Error> {
     ctx.defer().await?;
 
-    let (relic_input, requested_page) = parse_relic_and_page(&relic);
+    let requested_page = page.unwrap_or(1).max(1);
 
-    let Some(normalized_relic) = normalize_relic_name(relic_input.as_str()) else {
+    let Some(normalized_relic) = normalize_relic_name(relic.as_str()) else {
         ctx.say("❌ Invalid relic format. Use: 'Lith A1', 'Meso B5', 'Neo Z8', or 'Axi S9'")
             .await?;
         return Ok(());
@@ -183,43 +212,74 @@ pub async fn farm(
     let page_size = 10;
     let total_pages = sorted_missions.len().div_ceil(page_size);
 
-    if requested_page > total_pages {
-        ctx.say(format!(
-            "Page {} does not exist. There are {} pages for {}.",
-            requested_page, total_pages, relic_name
-        ))
-        .await?;
+    let clamped_page = requested_page.min(total_pages);
+    let initial_page_index = clamped_page - 1;
+
+    let pages: Vec<Vec<(String, Vec<(String, String, f64)>)>> = sorted_missions
+        .chunks(page_size)
+        .map(|chunk| chunk.to_vec())
+        .collect();
+
+    if pages.is_empty() {
+        ctx.say("No mission pages available.").await?;
         return Ok(());
     }
 
-    let start = (requested_page - 1) * page_size;
-    let end = usize::min(start + page_size, sorted_missions.len());
+    let mut current_page = initial_page_index;
 
-    // Format response
-    let mut response_text = format!(
-        "Best missions to farm {} (Page {}/{}):\n\n",
-        relic_name, requested_page, total_pages
-    );
-
-    for (mission, rotations) in sorted_missions[start..end].iter() {
-        response_text.push_str(&format!("{}\n", mission));
-
-        for (rotation, rarity, chance) in rotations {
-            response_text.push_str(&format!(
-                "  Rotation {} - {}: {:.2}%\n",
-                rotation, rarity, chance
-            ));
-        }
-        response_text.push('\n');
-    }
+    let mut message = ctx
+        .channel_id()
+        .send_message(
+            ctx.serenity_context(),
+            serenity::CreateMessage::new()
+                .content(format_page(
+                    &relic_name,
+                    current_page,
+                    total_pages,
+                    &pages[current_page],
+                ))
+                .components(page_components(current_page, total_pages)),
+        )
+        .await?;
 
     if total_pages > 1 {
-        response_text.push_str(&format!(
-            "Use: farm {} page <n> to view another page.",
-            normalized_relic
-        ));
+        while let Some(interaction) = serenity::collector::ComponentInteractionCollector::new(ctx.serenity_context())
+            .author_id(ctx.author().id)
+            .channel_id(ctx.channel_id())
+            .message_id(message.id)
+            .timeout(Duration::from_secs(120))
+            .await
+        {
+            match interaction.data.custom_id.as_str() {
+                "farm_prev" if current_page > 0 => current_page -= 1,
+                "farm_next" if current_page + 1 < total_pages => current_page += 1,
+                _ => {}
+            }
+
+            interaction
+                .create_response(
+                    ctx.serenity_context(),
+                    serenity::CreateInteractionResponse::UpdateMessage(
+                        serenity::CreateInteractionResponseMessage::new()
+                            .content(format_page(
+                                &relic_name,
+                                current_page,
+                                total_pages,
+                                &pages[current_page],
+                            ))
+                            .components(page_components(current_page, total_pages)),
+                    ),
+                )
+                .await?;
+        }
+
+        message
+            .edit(
+                ctx.serenity_context(),
+                serenity::EditMessage::new().components(Vec::new()),
+            )
+            .await?;
     }
 
-    ctx.say(response_text).await?;
     Ok(())
 }
