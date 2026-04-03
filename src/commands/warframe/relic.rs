@@ -23,7 +23,6 @@ struct Relic {
 struct RelicReward {
     #[serde(rename = "itemName")]
     item_name: String,
-    rarity: String,
     chance: f64,
 }
 
@@ -51,8 +50,6 @@ struct FoundRelic {
     tier: String,
     relic_name: String,
     state: String,
-    item_name: String,
-    rarity: String,
     chance: f64,
 }
 
@@ -76,8 +73,6 @@ fn collect_matching_relics(relics: RelicResponse, search_term: &str) -> Vec<Foun
                     tier: relic.tier.clone(),
                     relic_name: relic_name.clone(),
                     state: relic.state.clone(),
-                    item_name: reward.item_name.clone(),
-                    rarity: reward.rarity.clone(),
                     chance: reward.chance,
                 });
             }
@@ -93,7 +88,6 @@ fn sort_relics(found_relics: &mut [FoundRelic]) {
             .cmp(&b.tier)
             .then_with(|| a.relic_name.cmp(&b.relic_name))
             .then_with(|| state_order(&a.state).cmp(&state_order(&b.state)))
-            .then_with(|| a.item_name.cmp(&b.item_name))
             .then_with(|| b.chance.partial_cmp(&a.chance).unwrap_or(Ordering::Equal))
     });
 }
@@ -121,12 +115,16 @@ fn format_relic_response(item: &str, grouped_relics: &[RelicEntry]) -> String {
     for (relic_name, entries) in grouped_relics {
         response_text.push_str(&format!("{}\n", relic_name));
 
-        for entry in entries {
-            response_text.push_str(&format!(
-                "  {}: {} - {} ({:.2}%)\n",
-                entry.state, entry.item_name, entry.rarity, entry.chance
-            ));
+        let states = ["Intact", "Exceptional", "Flawless", "Radiant"];
+        let mut state_parts = Vec::new();
+
+        for state in states {
+            if let Some(entry) = entries.iter().find(|e| e.state == state) {
+                state_parts.push(format!("{} {:.2}%", state, entry.chance));
+            }
         }
+
+        response_text.push_str(&format!("  {}\n", state_parts.join(" | ")));
 
         response_text.push('\n');
     }
