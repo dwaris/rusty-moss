@@ -54,6 +54,27 @@ fn normalize_relic_name(input: &str) -> Option<String> {
     Some(format!("{} {}", normalized_tier, code.to_ascii_uppercase()))
 }
 
+fn parse_relic_and_page(input: &str) -> (String, usize) {
+    let trimmed = input.trim();
+    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+
+    if parts.len() >= 4 {
+        let last = parts[parts.len() - 1];
+        let prev = parts[parts.len() - 2];
+
+        if prev.eq_ignore_ascii_case("page") {
+            if let Ok(page) = last.parse::<usize>() {
+                if page > 0 {
+                    let relic = parts[..parts.len() - 2].join(" ");
+                    return (relic, page);
+                }
+            }
+        }
+    }
+
+    (trimmed.to_string(), 1)
+}
+
 /// Find the best missions to farm a specific relic
 #[poise::command(slash_command, prefix_command, category = "Warframe")]
 pub async fn farm(
@@ -64,7 +85,9 @@ pub async fn farm(
 ) -> Result<(), Error> {
     ctx.defer().await?;
 
-    let Some(normalized_relic) = normalize_relic_name(&relic) else {
+    let (relic_input, requested_page) = parse_relic_and_page(&relic);
+
+    let Some(normalized_relic) = normalize_relic_name(relic_input.as_str()) else {
         ctx.say("❌ Invalid relic format. Use: 'Lith A1', 'Meso B5', 'Neo Z8', or 'Axi S9'")
             .await?;
         return Ok(());
@@ -141,10 +164,7 @@ pub async fn farm(
     }
 
     // Sort by drop chance (highest first)
-    found_missions.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap());
-
-    // Format response
-    let mut response_text = format!("Best missions to farm {}:\n\n", relic_name);
+    found_missions.sort_by(|a, b| b.4.partial_cmp(&a.4).unwrap());
 
     // Group by mission and show best rotation
     let mut mission_map: HashMap<String, Vec<(String, String, f64)>> = HashMap::new();
@@ -162,7 +182,28 @@ pub async fn farm(
         max_b.partial_cmp(&max_a).unwrap()
     });
 
-    for (mission, rotations) in sorted_missions.iter().take(10) {
+    let page_size = 10;
+    let total_pages = sorted_missions.len().div_ceil(page_size);
+
+    if requested_page > total_pages {
+        ctx.say(format!(
+            "Page {} does not exist. There are {} pages for {}.",
+            requested_page, total_pages, relic_name
+        ))
+        .await?;
+        return Ok(());
+    }
+
+    let start = (requested_page - 1) * page_size;
+    let end = usize::min(start + page_size, sorted_missions.len());
+
+    // Format response
+    let mut response_text = format!(
+        "Best missions to farm {} (Page {}/{}):\n\n",
+        relic_name, requested_page, total_pages
+    );
+
+    for (mission, rotations) in sorted_missions[start..end].iter() {
         response_text.push_str(&format!("{}\n", mission));
 
         for (rotation, rarity, chance) in rotations {
@@ -174,10 +215,10 @@ pub async fn farm(
         response_text.push('\n');
     }
 
-    if sorted_missions.len() > 10 {
+    if total_pages > 1 {
         response_text.push_str(&format!(
-            "...and {} more missions",
-            sorted_missions.len() - 10
+            "Use: farm {} page <n> to view another page.",
+            normalized_relic
         ));
     }
 
