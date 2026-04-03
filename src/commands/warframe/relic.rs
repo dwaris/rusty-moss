@@ -2,6 +2,7 @@ use super::api::get_cached_json;
 use crate::{Context, Error};
 use serde::Deserialize;
 use std::cmp::Ordering;
+use std::collections::HashSet;
 
 #[derive(Deserialize, Debug)]
 struct RelicResponse {
@@ -33,6 +34,38 @@ fn normalize_text(text: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase()
+}
+
+fn collect_item_suggestions(relics: &RelicResponse, partial: &str) -> Vec<String> {
+    let partial_lower = normalize_text(partial);
+    let mut unique = HashSet::new();
+
+    for relic in &relics.relics {
+        for reward in &relic.rewards {
+            let cleaned = reward.item_name.split_whitespace().collect::<Vec<_>>().join(" ");
+            if !cleaned.contains("Prime") {
+                continue;
+            }
+
+            if partial_lower.is_empty() || cleaned.to_lowercase().contains(&partial_lower) {
+                unique.insert(cleaned);
+            }
+        }
+    }
+
+    let mut suggestions: Vec<String> = unique.into_iter().collect();
+    suggestions.sort();
+    suggestions.truncate(25);
+    suggestions
+}
+
+async fn relic_item_autocomplete(ctx: Context<'_>, partial: &str) -> Vec<String> {
+    let relics = match fetch_relics(&ctx).await {
+        Ok(relics) => relics,
+        Err(_) => return Vec::new(),
+    };
+
+    collect_item_suggestions(&relics, partial)
 }
 
 fn state_order(state: &str) -> usize {
@@ -137,6 +170,7 @@ fn format_relic_response(item: &str, grouped_relics: &[RelicEntry]) -> String {
 pub async fn relic(
     ctx: Context<'_>,
     #[description = "Prime item to search for (e.g., 'Ash Prime Systems')"]
+    #[autocomplete = "relic_item_autocomplete"]
     #[rest]
     item: String,
 ) -> Result<(), Error> {

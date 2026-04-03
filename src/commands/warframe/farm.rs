@@ -3,7 +3,7 @@ use crate::{Context, Error};
 use poise::serenity_prelude as serenity;
 use serde::Deserialize;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 type RotationDrop = (String, String, f64);
@@ -68,6 +68,66 @@ fn normalize_relic_name(input: &str) -> Option<String> {
     };
 
     Some(format!("{} {}", normalized_tier, code.to_ascii_uppercase()))
+}
+
+fn relic_name_from_item(item_name: &str) -> Option<String> {
+    let cleaned = item_name.split_whitespace().collect::<Vec<_>>().join(" ");
+    cleaned.strip_suffix(" Relic").map(str::to_string)
+}
+
+fn collect_relic_name_suggestions(api_response: &ApiResponse, partial: &str) -> Vec<String> {
+    let partial_lower = partial.trim().to_lowercase();
+    let mut unique = HashSet::new();
+
+    for missions in api_response.mission_rewards.values() {
+        for mission_data in missions.values() {
+            match &mission_data.rewards {
+                MissionRewards::Rotations(rewards_by_rotation) => {
+                    for rewards in rewards_by_rotation.values() {
+                        for reward in rewards {
+                            if let Some(name) = relic_name_from_item(&reward.item_name) {
+                                if let Some(normalized) = normalize_relic_name(&name) {
+                                    if partial_lower.is_empty() || normalized.to_lowercase().starts_with(&partial_lower) {
+                                        unique.insert(normalized);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                MissionRewards::List(rewards) => {
+                    for reward in rewards {
+                        if let Some(name) = relic_name_from_item(&reward.item_name) {
+                            if let Some(normalized) = normalize_relic_name(&name) {
+                                if partial_lower.is_empty() || normalized.to_lowercase().starts_with(&partial_lower) {
+                                    unique.insert(normalized);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let mut suggestions: Vec<String> = unique.into_iter().collect();
+    suggestions.sort();
+    suggestions.truncate(25);
+    suggestions
+}
+
+async fn farm_relic_autocomplete(ctx: Context<'_>, partial: &str) -> Vec<String> {
+    let payload = match get_cached_json(&ctx, "https://drops.warframestat.us/data/missionRewards.json").await {
+        Ok(payload) => payload,
+        Err(_) => return Vec::new(),
+    };
+
+    let api_response: ApiResponse = match serde_json::from_value(payload) {
+        Ok(response) => response,
+        Err(_) => return Vec::new(),
+    };
+
+    collect_relic_name_suggestions(&api_response, partial)
 }
 
 fn page_components(current_page: usize, total_pages: usize) -> Vec<serenity::CreateActionRow> {
@@ -250,6 +310,7 @@ pub async fn farm(
     #[description = "Result page number (default 1)"]
     page: Option<usize>,
     #[description = "Relic to farm (e.g., 'Lith A1' or 'Axi S9')"]
+    #[autocomplete = "farm_relic_autocomplete"]
     #[rest]
     relic: String,
 ) -> Result<(), Error> {
