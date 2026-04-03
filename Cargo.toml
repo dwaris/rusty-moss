@@ -1,6 +1,6 @@
 [package]
 name = "rusty-moss"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["dwaris <dwaris@itclowd.de>"]
 license = "BSD-2-Clause"
 edition = "2024"
