@@ -1,7 +1,7 @@
 use crate::{Context, Error};
 use serde::de::DeserializeOwned;
 
-pub async fn get_cached_json<T: DeserializeOwned + Clone + 'static>(
+pub async fn get_cached_json<T: DeserializeOwned + 'static>(
     ctx: &Context<'_>,
     url: &str,
 ) -> Result<T, Error> {

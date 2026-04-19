@@ -1,3 +1,4 @@
 mod api;
-pub mod relic;
-pub mod farm;
+mod normalization;
+pub mod relic_farming;
+pub mod relic_lookup;

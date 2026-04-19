@@ -43,8 +43,8 @@ fn framework_commands() -> Vec<poise::Command<BotData, Error>> {
     vec![
         fun::ping::ping(),
         utility::help::help(),
-        warframe::relic::relic(),
-        warframe::farm::farm(),
+        warframe::relic_lookup::relic(),
+        warframe::relic_farming::farm(),
     ]
 }
 
