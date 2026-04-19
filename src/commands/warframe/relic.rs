@@ -4,12 +4,12 @@ use serde::Deserialize;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct RelicResponse {
     relics: Vec<Relic>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct Relic {
     #[serde(rename = "_id")]
     _id: String,
@@ -20,7 +20,7 @@ struct Relic {
     rewards: Vec<RelicReward>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct RelicReward {
     #[serde(rename = "itemName")]
     item_name: String,
@@ -36,6 +36,64 @@ fn normalize_text(text: &str) -> String {
         .to_lowercase()
 }
 
+fn normalize_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn extract_prime_set_name(item_name: &str) -> Option<String> {
+    let tokens: Vec<&str> = item_name.split_whitespace().collect();
+    let prime_index = tokens.iter().position(|token| token.eq_ignore_ascii_case("prime"))?;
+
+    if prime_index == 0 {
+        return None;
+    }
+
+    Some(tokens[..=prime_index].join(" "))
+}
+
+fn parse_prime_set_query(input: &str) -> Option<String> {
+    let mut tokens: Vec<&str> = input.split_whitespace().collect();
+    if tokens.is_empty() {
+        return None;
+    }
+
+    if tokens
+        .last()
+        .map(|token| token.eq_ignore_ascii_case("set"))
+        .unwrap_or(false)
+    {
+        tokens.pop();
+    }
+
+    if tokens.is_empty() {
+        return None;
+    }
+
+    let prime_index = tokens.iter().position(|token| token.eq_ignore_ascii_case("prime"))?;
+    if prime_index == 0 || prime_index != tokens.len() - 1 {
+        return None;
+    }
+
+    Some(tokens[..=prime_index].join(" "))
+}
+
+fn part_sort_key(part_name: &str) -> (usize, String) {
+    let normalized = normalize_text(part_name);
+    let rank = if normalized.ends_with(" prime blueprint") {
+        0
+    } else if normalized.ends_with(" prime chassis blueprint") {
+        1
+    } else if normalized.ends_with(" prime neuroptics blueprint") {
+        2
+    } else if normalized.ends_with(" prime systems blueprint") {
+        3
+    } else {
+        10
+    };
+
+    (rank, normalized)
+}
+
 fn collect_item_suggestions(relics: &RelicResponse, partial: &str) -> Vec<String> {
     let partial_lower = normalize_text(partial);
     let mut unique = HashSet::new();
@@ -49,6 +107,13 @@ fn collect_item_suggestions(relics: &RelicResponse, partial: &str) -> Vec<String
 
             if partial_lower.is_empty() || cleaned.to_lowercase().contains(&partial_lower) {
                 unique.insert(cleaned);
+            }
+
+            if let Some(set_name) = extract_prime_set_name(&reward.item_name) {
+                let cleaned_set = normalize_whitespace(&set_name);
+                if partial_lower.is_empty() || cleaned_set.to_lowercase().contains(&partial_lower) {
+                    unique.insert(cleaned_set);
+                }
             }
         }
     }
@@ -87,14 +152,62 @@ struct FoundRelic {
 }
 
 async fn fetch_relics(ctx: &Context<'_>) -> Result<RelicResponse, Error> {
-    let payload = get_cached_json(ctx, "https://drops.warframestat.us/data/relics.json").await?;
-    Ok(serde_json::from_value(payload)?)
+    get_cached_json(ctx, "https://drops.warframestat.us/data/relics.json").await
 }
 
-fn collect_matching_relics(relics: RelicResponse, search_term: &str) -> Vec<FoundRelic> {
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_text() {
+        assert_eq!(normalize_text("  Ash  Prime  Systems  "), "ash prime systems");
+        assert_eq!(normalize_text("ASH PRIME"), "ash prime");
+    }
+
+    #[test]
+    fn test_extract_prime_set_name() {
+        assert_eq!(extract_prime_set_name("Ash Prime Systems"), Some("Ash Prime".to_string()));
+        assert_eq!(extract_prime_set_name("Ash Prime"), Some("Ash Prime".to_string()));
+        assert_eq!(extract_prime_set_name("Braton Prime Barrel"), Some("Braton Prime".to_string()));
+        assert_eq!(extract_prime_set_name("Forma BP"), None);
+        assert_eq!(extract_prime_set_name("Prime Part"), None);
+    }
+
+    #[test]
+    fn test_parse_prime_set_query() {
+        assert_eq!(parse_prime_set_query("Ash Prime Set"), Some("Ash Prime".to_string()));
+        assert_eq!(parse_prime_set_query("Ash Prime"), Some("Ash Prime".to_string()));
+        assert_eq!(parse_prime_set_query("Ash"), None);
+        assert_eq!(parse_prime_set_query("Prime Set"), None);
+    }
+
+    #[test]
+    fn test_part_sort_key() {
+        let bp = part_sort_key("Ash Prime Blueprint");
+        let chassis = part_sort_key("Ash Prime Chassis Blueprint");
+        let systems = part_sort_key("Ash Prime Systems Blueprint");
+        let neuro = part_sort_key("Ash Prime Neuroptics Blueprint");
+        let other = part_sort_key("Ash Prime Stock");
+
+        assert!(bp.0 < chassis.0);
+        assert!(chassis.0 < neuro.0);
+        assert!(neuro.0 < systems.0);
+        assert!(systems.0 < other.0);
+    }
+
+    #[test]
+    fn test_state_order() {
+        assert_eq!(state_order("Intact"), 0);
+        assert_eq!(state_order("Radiant"), 3);
+        assert_eq!(state_order("Unknown"), 4);
+    }
+}
+
+fn collect_matching_relics(relics: &RelicResponse, search_term: &str) -> Vec<FoundRelic> {
     let mut found = Vec::new();
 
-    for relic in relics.relics {
+    for relic in &relics.relics {
         let Some(relic_name_part) = relic.relic_name.as_deref() else {
             continue;
         };
@@ -113,6 +226,83 @@ fn collect_matching_relics(relics: RelicResponse, search_term: &str) -> Vec<Foun
     }
 
     found
+}
+
+fn collect_set_parts(relics: &RelicResponse, set_name: &str) -> Vec<String> {
+    let set_prefix = format!("{} ", normalize_text(set_name));
+    let mut unique_parts = HashSet::new();
+
+    for relic in &relics.relics {
+        for reward in &relic.rewards {
+            let cleaned_item = normalize_whitespace(&reward.item_name);
+            let normalized_item = normalize_text(&cleaned_item);
+
+            if normalized_item.starts_with(&set_prefix) {
+                unique_parts.insert(cleaned_item);
+            }
+        }
+    }
+
+    let mut parts: Vec<String> = unique_parts.into_iter().collect();
+    parts.sort_by_key(|part| part_sort_key(part));
+    parts
+}
+
+fn format_set_response(set_name: &str, part_groups: &[(String, Vec<RelicEntry>)]) -> String {
+    let mut response_text = format!("Relics for {} set:\n\n", set_name);
+
+    for (part_name, grouped_relics) in part_groups {
+        response_text.push_str(&format!("{}\n", part_name));
+
+        if grouped_relics.is_empty() {
+            response_text.push_str("  No relics found for this part.\n\n");
+            continue;
+        }
+
+        for (relic_name, entries) in grouped_relics {
+            let states = ["Intact", "Exceptional", "Flawless", "Radiant"];
+            let mut state_parts = Vec::new();
+
+            for state in states {
+                if let Some(entry) = entries.iter().find(|e| e.state == state) {
+                    state_parts.push(format!("{} {:.2}%", state, entry.chance));
+                }
+            }
+
+            response_text.push_str(&format!("  {} -> {}\n", relic_name, state_parts.join(" | ")));
+        }
+
+        response_text.push('\n');
+    }
+
+    response_text
+}
+
+async fn say_chunked(ctx: Context<'_>, content: &str) -> Result<(), Error> {
+    const MAX_CHARS: usize = 1_900;
+
+    if content.chars().count() <= MAX_CHARS {
+        ctx.say(content).await?;
+        return Ok(());
+    }
+
+    let mut current = String::new();
+    for line in content.lines() {
+        let candidate_len = current.chars().count() + line.chars().count() + 1;
+        if candidate_len > MAX_CHARS && !current.is_empty() {
+            ctx.say(current.clone()).await?;
+            current.clear();
+        }
+
+        current.push_str(line);
+        current.push('\n');
+    }
+
+    if !current.is_empty() {
+        ctx.say(current).await?;
+    }
+
+    Ok(())
 }
 
 fn sort_relics(found_relics: &mut [FoundRelic]) {
@@ -184,8 +374,34 @@ pub async fn relic(
         }
     };
 
+    if let Some(set_name) = parse_prime_set_query(&item) {
+        let set_parts = collect_set_parts(&relics, &set_name);
+
+        if set_parts.is_empty() {
+            ctx.say(format!(
+                "No Prime set parts found for {}. Try a full Prime set name like 'Xaku Prime'.",
+                set_name
+            ))
+            .await?;
+            return Ok(());
+        }
+
+        let mut part_groups = Vec::new();
+        for part in set_parts {
+            let search_term = normalize_text(&part);
+            let mut found_relics = collect_matching_relics(&relics, &search_term);
+            sort_relics(&mut found_relics);
+            let grouped_relics = group_relics(found_relics);
+            part_groups.push((part, grouped_relics));
+        }
+
+        let response_text = format_set_response(&set_name, &part_groups);
+        say_chunked(ctx, &response_text).await?;
+        return Ok(());
+    }
+
     let search_term = normalize_text(&item);
-    let mut found_relics = collect_matching_relics(relics, &search_term);
+    let mut found_relics = collect_matching_relics(&relics, &search_term);
 
     if found_relics.is_empty() {
         ctx.say(format!("No relics found containing {}\n\nMake sure to include 'Prime' in your search (e.g., 'Ash Prime Systems')", item))
@@ -197,6 +413,6 @@ pub async fn relic(
     let grouped_relics = group_relics(found_relics);
     let response_text = format_relic_response(&item, &grouped_relics);
 
-    ctx.say(response_text).await?;
+    say_chunked(ctx, &response_text).await?;
     Ok(())
 }
