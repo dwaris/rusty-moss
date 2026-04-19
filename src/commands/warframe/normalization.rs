@@ -6,14 +6,9 @@ pub fn normalize_text(input: &str) -> String {
     normalize_whitespace(input).to_lowercase()
 }
 
-pub fn starts_with_prefix_ignore_ascii_case(text: &str, prefix: &str) -> bool {
-    if prefix.is_empty() {
-        return true;
-    }
-
+pub fn starts_with_ignore_case(text: &str, prefix: &str) -> bool {
     text.get(..prefix.len())
-        .map(|candidate| candidate.eq_ignore_ascii_case(prefix))
-        .unwrap_or(false)
+        .map_or(false, |candidate| candidate.eq_ignore_ascii_case(prefix))
 }
 
 #[cfg(test)]
@@ -31,9 +26,9 @@ mod tests {
     }
 
     #[test]
-    fn test_starts_with_prefix_ignore_ascii_case() {
-        assert!(starts_with_prefix_ignore_ascii_case("Lith A1 Relic", "lith a1"));
-        assert!(starts_with_prefix_ignore_ascii_case("Lith A1 Relic", ""));
-        assert!(!starts_with_prefix_ignore_ascii_case("Lith A1 Relic", "meso"));
+    fn test_starts_with_ignore_case() {
+        assert!(starts_with_ignore_case("Lith A1 Relic", "lith a1"));
+        assert!(starts_with_ignore_case("Lith A1 Relic", ""));
+        assert!(!starts_with_ignore_case("Lith A1 Relic", "meso"));
     }
 }

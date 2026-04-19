@@ -1,6 +1,7 @@
 use super::api::get_cached_json;
 use super::normalization::{normalize_text, normalize_whitespace};
 use crate::{Context, Error};
+use poise::serenity_prelude as serenity;
 use serde::Deserialize;
 use std::cmp::Ordering;
 use std::collections::HashSet;
@@ -33,7 +34,9 @@ const RELIC_STATES: [&str; 4] = ["Intact", "Exceptional", "Flawless", "Radiant"]
 
 fn extract_prime_set_name(item_name: &str) -> Option<String> {
     let tokens: Vec<&str> = item_name.split_whitespace().collect();
-    let prime_index = tokens.iter().position(|token| token.eq_ignore_ascii_case("prime"))?;
+    let prime_index = tokens
+        .iter()
+        .position(|token| token.eq_ignore_ascii_case("prime"))?;
 
     if prime_index == 0 {
         return None;
@@ -60,7 +63,9 @@ fn parse_prime_set_query(input: &str) -> Option<String> {
         return None;
     }
 
-    let prime_index = tokens.iter().position(|token| token.eq_ignore_ascii_case("prime"))?;
+    let prime_index = tokens
+        .iter()
+        .position(|token| token.eq_ignore_ascii_case("prime"))?;
     if prime_index == 0 || prime_index != tokens.len() - 1 {
         return None;
     }
@@ -209,49 +214,74 @@ fn format_state_chances(entries: &[FoundRelic]) -> String {
     state_parts.join(" | ")
 }
 
-fn format_set_response(set_name: &str, part_groups: &[(String, Vec<RelicEntry>)]) -> String {
-    let mut response_text = format!("Relics for {} set:\n\n", set_name);
+fn create_relic_embed(item: &str, grouped_relics: &[RelicEntry]) -> serenity::CreateEmbed {
+    let embed = serenity::CreateEmbed::new()
+        .title(format!("Relics containing {}", item))
+        .color(0x00AE86);
 
-    for (part_name, grouped_relics) in part_groups {
-        response_text.push_str(&format!("{}\n", part_name));
-
-        if grouped_relics.is_empty() {
-            response_text.push_str("  No relics found for this part.\n\n");
-            continue;
-        }
-
-        for (relic_name, entries) in grouped_relics {
-            response_text.push_str(&format!("  {} -> {}\n", relic_name, format_state_chances(entries)));
-        }
-
-        response_text.push('\n');
+    let mut description = String::new();
+    for (relic_name, entries) in grouped_relics {
+        description.push_str(&format!("**{}**\n", relic_name));
+        description.push_str(&format!("└ {}\n\n", format_state_chances(entries)));
     }
 
-    response_text
+    if description.is_empty() {
+        description.push_str("No relics found.");
+    }
+
+    embed.description(description)
 }
 
-async fn say_chunked(ctx: Context<'_>, content: &str) -> Result<(), Error> {
-    const MAX_CHARS: usize = 1_900;
+fn create_set_embeds(
+    set_name: &str,
+    part_groups: &[(String, Vec<RelicEntry>)],
+) -> Vec<serenity::CreateEmbed> {
+    let mut embeds = Vec::new();
+    let mut current_embed = serenity::CreateEmbed::new()
+        .title(format!("Relics for {} set", set_name))
+        .color(0x00AE86);
 
-    if content.chars().count() <= MAX_CHARS {
-        ctx.say(content).await?;
+    let mut current_description = String::new();
+
+    for (part_name, grouped_relics) in part_groups {
+        let mut part_text = format!("__**{}**__\n", part_name);
+
+        if grouped_relics.is_empty() {
+            part_text.push_str("  No relics found for this part.\n\n");
+        } else {
+            for (relic_name, entries) in grouped_relics {
+                part_text.push_str(&format!(
+                    "**{}** -> {}\n",
+                    relic_name,
+                    format_state_chances(entries)
+                ));
+            }
+            part_text.push('\n');
+        }
+
+        if current_description.len() + part_text.len() > 3800 {
+            embeds.push(current_embed.description(current_description));
+            current_embed = serenity::CreateEmbed::new().color(0x00AE86);
+            current_description = String::new();
+        }
+
+        current_description.push_str(&part_text);
+    }
+
+    if !current_description.is_empty() {
+        embeds.push(current_embed.description(current_description));
+    }
+
+    embeds
+}
+
+async fn send_embeds(ctx: Context<'_>, embeds: Vec<serenity::CreateEmbed>) -> Result<(), Error> {
+    if embeds.is_empty() {
         return Ok(());
     }
 
-    let mut current = String::new();
-    for line in content.lines() {
-        let candidate_len = current.chars().count() + line.chars().count() + 1;
-        if candidate_len > MAX_CHARS && !current.is_empty() {
-            ctx.say(current.clone()).await?;
-            current.clear();
-        }
-
-        current.push_str(line);
-        current.push('\n');
-    }
-
-    if !current.is_empty() {
-        ctx.say(current).await?;
+    for embed in embeds {
+        ctx.send(poise::CreateReply::default().embed(embed)).await?;
     }
 
     Ok(())
@@ -284,21 +314,11 @@ fn group_relics(found_relics: Vec<FoundRelic>) -> Vec<RelicEntry> {
     grouped
 }
 
-fn format_relic_response(item: &str, grouped_relics: &[RelicEntry]) -> String {
-    let mut response_text = format!("Relics containing {}:\n\n", item);
-
-    for (relic_name, entries) in grouped_relics {
-        response_text.push_str(&format!("{}\n", relic_name));
-
-        response_text.push_str(&format!("  {}\n", format_state_chances(entries)));
-
-        response_text.push('\n');
-    }
-
-    response_text
-}
-
-async fn handle_set_query(ctx: Context<'_>, relics: &RelicResponse, set_name: &str) -> Result<(), Error> {
+async fn handle_set_query(
+    ctx: Context<'_>,
+    relics: &RelicResponse,
+    set_name: &str,
+) -> Result<(), Error> {
     let set_parts = collect_set_parts(relics, set_name);
 
     if set_parts.is_empty() {
@@ -316,8 +336,8 @@ async fn handle_set_query(ctx: Context<'_>, relics: &RelicResponse, set_name: &s
         part_groups.push((part, grouped_relics));
     }
 
-    let response_text = format_set_response(set_name, &part_groups);
-    say_chunked(ctx, &response_text).await
+    let embeds = create_set_embeds(set_name, &part_groups);
+    send_embeds(ctx, embeds).await
 }
 
 /// Find which relics contain a specific prime item
@@ -355,9 +375,9 @@ pub async fn relic(
 
     sort_relics(&mut found_relics);
     let grouped_relics = group_relics(found_relics);
-    let response_text = format_relic_response(&item, &grouped_relics);
+    let embed = create_relic_embed(&item, &grouped_relics);
 
-    say_chunked(ctx, &response_text).await?;
+    ctx.send(poise::CreateReply::default().embed(embed)).await?;
     Ok(())
 }
 

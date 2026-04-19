@@ -1,5 +1,5 @@
 use super::api::get_cached_json;
-use super::normalization::{normalize_whitespace, starts_with_prefix_ignore_ascii_case};
+use super::normalization::{normalize_whitespace, starts_with_ignore_case};
 use crate::{Context, Error};
 use poise::serenity_prelude as serenity;
 use serde::Deserialize;
@@ -10,6 +10,8 @@ use std::time::Duration;
 type RotationDrop = (String, String, f64);
 type MissionDrops = (String, Vec<RotationDrop>);
 const MISSION_PAGE_SIZE: usize = 10;
+
+const FAST_GAME_MODES: &[&str] = &["Capture", "Exterminate", "Rescue", "Sabotage", "Spy"];
 
 #[derive(Deserialize, Debug)]
 struct ApiResponse {
@@ -102,22 +104,17 @@ async fn fetch_mission_rewards(ctx: &Context<'_>) -> Result<ApiResponse, Error> 
 }
 
 fn collect_relic_name_suggestions(api_response: &ApiResponse, partial: &str) -> Vec<String> {
-    let partial = partial.trim();
     let mut unique = HashSet::new();
 
     for missions in api_response.mission_rewards.values() {
         for mission_data in missions.values() {
             for_each_mission_reward(mission_data, |_, reward| {
-                let Some(name) = relic_name_from_item(&reward.item_name) else {
-                    return;
-                };
-
-                let Some(normalized) = normalize_relic_name(&name) else {
-                    return;
-                };
-
-                if starts_with_prefix_ignore_ascii_case(&normalized, partial) {
-                    unique.insert(normalized);
+                if let Some(name) = relic_name_from_item(&reward.item_name) {
+                    if let Some(normalized) = normalize_relic_name(&name) {
+                        if starts_with_ignore_case(&normalized, partial) {
+                            unique.insert(normalized);
+                        }
+                    }
                 }
             });
         }
@@ -141,18 +138,22 @@ async fn farm_relic_autocomplete(ctx: Context<'_>, partial: &str) -> Vec<String>
 fn page_components(current_page: usize, total_pages: usize) -> Vec<serenity::CreateActionRow> {
     let prev_button = serenity::CreateButton::new("farm_prev")
         .label("Previous")
-        .style(serenity::ButtonStyle::Primary)
+        .style(serenity::ButtonStyle::Secondary)
         .disabled(current_page == 0);
 
     let next_button = serenity::CreateButton::new("farm_next")
         .label("Next")
-        .style(serenity::ButtonStyle::Primary)
+        .style(serenity::ButtonStyle::Secondary)
         .disabled(current_page + 1 >= total_pages);
 
     vec![serenity::CreateActionRow::Buttons(vec![prev_button, next_button])]
 }
 
-fn collect_found_drops(api_response: ApiResponse, search_term: &str) -> Vec<FoundDrop> {
+fn collect_found_drops(
+    api_response: ApiResponse,
+    search_term: &str,
+    fast_only: bool,
+) -> Vec<FoundDrop> {
     let mut found = Vec::new();
 
     for (planet, missions) in api_response.mission_rewards {
@@ -161,10 +162,14 @@ fn collect_found_drops(api_response: ApiResponse, search_term: &str) -> Vec<Foun
                 continue;
             }
 
+            if fast_only && !FAST_GAME_MODES.contains(&mission_data.game_mode.as_str()) {
+                continue;
+            }
+
             let mission_path = format!("{}/{}", planet, mission_name);
 
             for_each_mission_reward(&mission_data, |rotation, reward| {
-                if !starts_with_prefix_ignore_ascii_case(&reward.item_name, search_term) {
+                if !starts_with_ignore_case(&reward.item_name, search_term) {
                     return;
                 }
 
@@ -186,7 +191,7 @@ fn group_and_sort_missions(found_drops: Vec<FoundDrop>) -> Vec<MissionDrops> {
     let mut mission_map: HashMap<String, Vec<RotationDrop>> = HashMap::new();
 
     for drop in found_drops {
-        let mission_label = format!("{} [{}]", drop.mission_path, drop.game_mode);
+        let mission_label = format!("{} ({})", drop.mission_path, drop.game_mode);
         mission_map
             .entry(mission_label)
             .or_default()
@@ -214,36 +219,38 @@ fn paginate_missions(missions: Vec<MissionDrops>, page_size: usize) -> Vec<Vec<M
         .collect()
 }
 
-fn format_page(
+fn create_page_embed(
     relic_name: &str,
     current_page: usize,
     total_pages: usize,
     missions: &[MissionDrops],
-) -> String {
-    let mut response_text = format!(
-        "Best missions to farm {} (Page {}/{}):\n\n",
-        relic_name,
-        current_page + 1,
-        total_pages
-    );
+) -> serenity::CreateEmbed {
+    let embed = serenity::CreateEmbed::new()
+        .title(format!("Best missions to farm {}", relic_name))
+        .color(0x00AE86)
+        .footer(serenity::CreateEmbedFooter::new(format!(
+            "Page {}/{}",
+            current_page + 1,
+            total_pages
+        )));
 
+    let mut description = String::new();
     for (mission, rotations) in missions {
-        response_text.push_str(&format!("{}\n", mission));
-
+        description.push_str(&format!("**{}**\n", mission));
         for (rotation, rarity, chance) in rotations {
-            response_text.push_str(&format!(
-                "  Rotation {} - {}: {:.2}%\n",
+            description.push_str(&format!(
+                "└ Rotation {} - {}: **{:.2}%**\n",
                 rotation, rarity, chance
             ));
         }
-        response_text.push('\n');
+        description.push('\n');
     }
 
-    if total_pages > 1 {
-        response_text.push_str("Use the buttons below to change pages.");
+    if description.is_empty() {
+        description.push_str("No missions found.");
     }
 
-    response_text
+    embed.description(description)
 }
 
 async fn handle_page_interactions(
@@ -254,17 +261,18 @@ async fn handle_page_interactions(
     pages: &[Vec<MissionDrops>],
     current_page: &mut usize,
 ) -> Result<(), Error> {
-    while let Some(interaction) = serenity::collector::ComponentInteractionCollector::new(ctx.serenity_context())
-        .author_id(ctx.author().id)
-        .channel_id(ctx.channel_id())
-        .message_id(message.id)
-        .timeout(Duration::from_secs(120))
-        .await
+    while let Some(interaction) =
+        serenity::collector::ComponentInteractionCollector::new(ctx.serenity_context())
+            .author_id(ctx.author().id)
+            .channel_id(ctx.channel_id())
+            .message_id(message.id)
+            .timeout(Duration::from_secs(120))
+            .await
     {
         match interaction.data.custom_id.as_str() {
             "farm_prev" if *current_page > 0 => *current_page -= 1,
             "farm_next" if *current_page + 1 < total_pages => *current_page += 1,
-            _ => {}
+            _ => continue,
         }
 
         interaction
@@ -272,7 +280,7 @@ async fn handle_page_interactions(
                 ctx.serenity_context(),
                 serenity::CreateInteractionResponse::UpdateMessage(
                     serenity::CreateInteractionResponseMessage::new()
-                        .content(format_page(
+                        .add_embed(create_page_embed(
                             relic_name,
                             *current_page,
                             total_pages,
@@ -298,8 +306,8 @@ async fn handle_page_interactions(
 #[poise::command(slash_command, prefix_command, category = "Warframe")]
 pub async fn farm(
     ctx: Context<'_>,
-    #[description = "Result page number (default 1)"]
-    page: Option<usize>,
+    #[description = "Only show fast mission types (default true)"] fast_only: Option<bool>,
+    #[description = "Result page number (default 1)"] page: Option<usize>,
     #[description = "Relic to farm (e.g., 'Lith A1' or 'Axi S9')"]
     #[autocomplete = "farm_relic_autocomplete"]
     #[rest]
@@ -307,6 +315,7 @@ pub async fn farm(
 ) -> Result<(), Error> {
     ctx.defer().await?;
 
+    let fast_only = fast_only.unwrap_or(true);
     let requested_page = page.unwrap_or(1).max(1);
 
     let Some(normalized_relic) = normalize_relic_name(relic.as_str()) else {
@@ -326,14 +335,15 @@ pub async fn farm(
         }
     };
 
-    let mut found_drops = collect_found_drops(api_response, search_term);
+    let mut found_drops = collect_found_drops(api_response, search_term, fast_only);
 
     if found_drops.is_empty() {
-        ctx.say(format!(
-            "❌ No missions found that drop **{}**\n\nMake sure to use the format: 'Lith A1', 'Meso B5', 'Neo Z8', or 'Axi S9'. If the format is correct, this relic may not be in the current drop table.",
-            relic_name
-        ))
-        .await?;
+        let msg = if fast_only {
+            format!("❌ No fast missions found that drop **{}**. Try setting `fast_only` to false.", relic_name)
+        } else {
+            format!("❌ No missions found that drop **{}**\n\nMake sure to use the format: 'Lith A1', 'Meso B5', 'Neo Z8', or 'Axi S9'. If the format is correct, this relic may not be in the current drop table.", relic_name)
+        };
+        ctx.say(msg).await?;
         return Ok(());
     }
 
@@ -344,14 +354,12 @@ pub async fn farm(
     let pages = paginate_missions(sorted_missions, MISSION_PAGE_SIZE);
 
     let total_pages = pages.len();
-    let mut current_page = requested_page.min(total_pages) - 1;
+    let mut current_page = (requested_page - 1).min(total_pages - 1);
 
     let message = ctx
-        .channel_id()
-        .send_message(
-            ctx.serenity_context(),
-            serenity::CreateMessage::new()
-                .content(format_page(
+        .send(
+            poise::CreateReply::default()
+                .embed(create_page_embed(
                     &relic_name,
                     current_page,
                     total_pages,
@@ -359,6 +367,8 @@ pub async fn farm(
                 ))
                 .components(page_components(current_page, total_pages)),
         )
+        .await?
+        .into_message()
         .await?;
 
     if total_pages > 1 {
@@ -474,7 +484,7 @@ mod tests {
             )]),
         };
 
-        let found = collect_found_drops(api_response, "lith a1 relic");
+        let found = collect_found_drops(api_response, "lith a1 relic", false);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].mission_path, "Earth/E Prime");
     }
