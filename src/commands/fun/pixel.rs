@@ -45,10 +45,10 @@ fn render_styled_buffer(buffer: &[Vec<(char, u8)>], palette: &[&str]) -> String 
     output
 }
 
-// --- MATRIX ---
+// --- SHADER: MATRIX ---
 fn render_matrix(frame: usize, drops: &mut [usize]) -> String {
     let mut buffer = vec![vec![(' ', 0u8); WIDTH]; HEIGHT];
-    
+
     for x in 0..WIDTH {
         if x % 2 != 0 {
             continue;
@@ -75,17 +75,28 @@ fn render_matrix(frame: usize, drops: &mut [usize]) -> String {
         }
     }
 
-    render_styled_buffer(&buffer, &[STYLE_RESET, "\x1b[1;37m", "\x1b[1;32m", "\x1b[0;32m"])
+    render_styled_buffer(
+        &buffer,
+        &[STYLE_RESET, "\x1b[1;37m", "\x1b[1;32m", "\x1b[0;32m"],
+    )
 }
 
-// --- FIRE ---
+// --- SHADER: FIRE ---
 fn render_fire(_frame: usize, fire_buffer: &mut [Vec<f64>]) -> String {
     for y in 0..HEIGHT - 1 {
         for x in 0..WIDTH {
-            let left = if x > 0 { fire_buffer[y + 1][x - 1] } else { 0.0 };
-            let right = if x < WIDTH - 1 { fire_buffer[y + 1][x + 1] } else { 0.0 };
+            let left = if x > 0 {
+                fire_buffer[y + 1][x - 1]
+            } else {
+                0.0
+            };
+            let right = if x < WIDTH - 1 {
+                fire_buffer[y + 1][x + 1]
+            } else {
+                0.0
+            };
             let mid = fire_buffer[y + 1][x];
-            
+
             let cooling = rand::random::<f64>() * 0.1;
             fire_buffer[y][x] = ((left + right + mid) / 3.0 - cooling).clamp(0.0, 1.0);
         }
@@ -116,10 +127,19 @@ fn render_fire(_frame: usize, fire_buffer: &mut [Vec<f64>]) -> String {
         }
     }
 
-    render_styled_buffer(&buffer, &[STYLE_RESET, "\x1b[1;37m", "\x1b[1;33m", "\x1b[1;31m", "\x1b[0;31m"])
+    render_styled_buffer(
+        &buffer,
+        &[
+            STYLE_RESET,
+            "\x1b[1;37m",
+            "\x1b[1;33m",
+            "\x1b[1;31m",
+            "\x1b[0;31m",
+        ],
+    )
 }
 
-// --- DVD ---
+// --- SHADER: DVD ---
 fn render_dvd(frame: usize, offset_x: usize, offset_y: usize) -> String {
     let speed_x = 2;
     let speed_y = 1;
@@ -134,80 +154,154 @@ fn render_dvd(frame: usize, offset_x: usize, offset_y: usize) -> String {
     let total_dist_y = frame * speed_y + offset_y;
 
     let mut x = total_dist_x % (bounce_limit_x * 2);
-    if x >= bounce_limit_x { x = bounce_limit_x * 2 - x; }
-    
+    if x >= bounce_limit_x {
+        x = bounce_limit_x * 2 - x;
+    }
+
     let mut y = total_dist_y % (bounce_limit_y * 2);
-    if y >= bounce_limit_y { y = bounce_limit_y * 2 - y; }
+    if y >= bounce_limit_y {
+        y = bounce_limit_y * 2 - y;
+    }
 
     let bounces = (total_dist_x / bounce_limit_x) + (total_dist_y / bounce_limit_y);
 
-    let colors = ["\x1b[1;31m", "\x1b[1;32m", "\x1b[1;33m", "\x1b[1;34m", "\x1b[1;35m", "\x1b[1;36m"];
+    let colors = [
+        "\x1b[1;31m",
+        "\x1b[1;32m",
+        "\x1b[1;33m",
+        "\x1b[1;34m",
+        "\x1b[1;35m",
+        "\x1b[1;36m",
+    ];
     let color = colors[bounces % colors.len()];
-    
+
     let mut output = String::new();
     output.push('+');
-    for _ in 0..inner_w { output.push('-'); }
+    for _ in 0..inner_w {
+        output.push('-');
+    }
     output.push_str("+\n");
 
     for iy in 0..inner_h {
         output.push('|');
         if iy == y {
-            for _ in 0..x { output.push(' '); }
+            for _ in 0..x {
+                output.push(' ');
+            }
             output.push_str(color);
             output.push_str("DVD");
             output.push_str("\x1b[0m");
-            for _ in (x+3)..inner_w { output.push(' '); }
+            for _ in (x + 3)..inner_w {
+                output.push(' ');
+            }
         } else {
-            for _ in 0..inner_w { output.push(' '); }
+            for _ in 0..inner_w {
+                output.push(' ');
+            }
         }
         output.push_str("|\n");
     }
 
     output.push('+');
-    for _ in 0..inner_w { output.push('-'); }
+    for _ in 0..inner_w {
+        output.push('-');
+    }
     output.push_str("+\n");
     output
 }
 
+/// Stop any ongoing animation you have running
+#[poise::command(slash_command, prefix_command, category = "Fun")]
+pub async fn stop(ctx: Context<'_>) -> Result<(), Error> {
+    let user_id = ctx.author().id;
+    let mut active = ctx.data().active_animations.write().await;
+
+    if let Some(tx) = active.remove(&user_id) {
+        let _ = tx.send(true);
+        ctx.say("Animation stopped.").await?;
+    } else {
+        ctx.say("You don't have any animations running.").await?;
+    }
+
+    Ok(())
+}
+
+/// Run a cool ASCII pixel animation
 #[poise::command(slash_command, prefix_command, category = "Fun")]
 pub async fn pixel(
     ctx: Context<'_>,
     #[description = "The animation effect to play"] effect: AnimationType,
     #[description = "Run for a long time (max 5.5 mins)"] endless: Option<bool>,
 ) -> Result<(), Error> {
+    let user_id = ctx.author().id;
+    let (tx, rx) = tokio::sync::watch::channel(false);
+
+    {
+        let mut active = ctx.data().active_animations.write().await;
+        if let Some(old_tx) = active.insert(user_id, tx) {
+            let _ = old_tx.send(true);
+        }
+    }
+
     let mut drops = vec![0; WIDTH];
     for drop in &mut drops {
         *drop = rand::random::<usize>() % HEIGHT;
     }
 
     let mut fire_buffer = vec![vec![0.0; WIDTH]; HEIGHT];
-
     let offset_x = rand::random::<usize>() % 20;
     let offset_y = rand::random::<usize>() % 10;
 
     let mut frame = 0;
-    let max_frames = if endless.unwrap_or(false) { 300 } else { 15 };
+    let is_endless = endless.unwrap_or(false);
+    let max_frames = if is_endless { 300 } else { 15 };
 
-    let mut message = ctx.say(wrap_ansi("Initializing shader...")).await?.into_message().await?;
+    let mut message = ctx
+        .say(wrap_ansi("Initializing shader..."))
+        .await?
+        .into_message()
+        .await?;
 
     while frame < max_frames {
+        if *rx.borrow() {
+            break;
+        }
+
         let content = match effect {
             AnimationType::Matrix => render_matrix(frame, &mut drops),
             AnimationType::Dvd => render_dvd(frame, offset_x, offset_y),
             AnimationType::Fire => render_fire(frame, &mut fire_buffer),
         };
 
-        message.edit(ctx.serenity_context(), serenity::EditMessage::new()
-            .content(wrap_ansi(&content))
-        ).await?;
+        if let Err(_) = message
+            .edit(
+                ctx.serenity_context(),
+                serenity::EditMessage::new().content(wrap_ansi(&content)),
+            )
+            .await
+        {
+            break;
+        }
 
         frame += 1;
         sleep(Duration::from_millis(1100)).await;
     }
 
-    message.edit(ctx.serenity_context(), serenity::EditMessage::new()
-        .content("Animation finished.")
-    ).await?;
+    {
+        let mut active = ctx.data().active_animations.write().await;
+        if let Some(current_tx) = active.get(&user_id) {
+            if current_tx.is_closed() || frame >= max_frames || *rx.borrow() {
+                active.remove(&user_id);
+            }
+        }
+    }
+
+    let _ = message
+        .edit(
+            ctx.serenity_context(),
+            serenity::EditMessage::new().content("Animation finished."),
+        )
+        .await;
 
     Ok(())
 }

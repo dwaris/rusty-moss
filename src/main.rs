@@ -26,6 +26,8 @@ pub struct BotData {
     warframe_cache: RwLock<HashMap<String, CachedPayload>>,
     warframe_cache_ttl: Duration,
     relic_names_cache: RwLock<Option<(Instant, Vec<String>)>>,
+    // UserID -> Stop Signal Sender
+    active_animations: RwLock<HashMap<serenity::UserId, tokio::sync::watch::Sender<bool>>>,
 }
 
 fn build_bot_data() -> Result<BotData, Error> {
@@ -38,6 +40,7 @@ fn build_bot_data() -> Result<BotData, Error> {
         warframe_cache: RwLock::new(HashMap::new()),
         warframe_cache_ttl: Duration::from_secs(WARFRAME_CACHE_TTL_SECS),
         relic_names_cache: RwLock::new(None),
+        active_animations: RwLock::new(HashMap::new()),
     })
 }
 
@@ -45,6 +48,7 @@ fn framework_commands() -> Vec<poise::Command<BotData, Error>> {
     vec![
         fun::ping::ping(),
         fun::pixel::pixel(),
+        fun::pixel::stop(),
         utility::help::help(),
         warframe::relic_lookup::lookup(),
         warframe::relic_farming::farm(),
