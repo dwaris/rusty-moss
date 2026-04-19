@@ -1,5 +1,6 @@
 use crate::{Context, Error};
 use poise::serenity_prelude as serenity;
+use rand::RngExt;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -97,13 +98,13 @@ fn render_fire(_frame: usize, fire_buffer: &mut [Vec<f64>]) -> String {
             };
             let mid = fire_buffer[y + 1][x];
 
-            let cooling = rand::random::<f64>() * 0.1;
+            let cooling = rand::rng().random::<f64>() * 0.1;
             fire_buffer[y][x] = ((left + right + mid) / 3.0 - cooling).clamp(0.0, 1.0);
         }
     }
 
     for x in 0..WIDTH {
-        let fuel = (rand::random::<f64>() * 0.5) + 0.5;
+        let fuel = (rand::rng().random::<f64>() * 0.5) + 0.5;
         fire_buffer[HEIGHT - 1][x] = fuel;
     }
 
@@ -245,12 +246,12 @@ pub async fn pixel(
 
     let mut drops = vec![0; WIDTH];
     for drop in &mut drops {
-        *drop = rand::random::<usize>() % HEIGHT;
+        *drop = rand::rng().random_range(0..HEIGHT);
     }
 
     let mut fire_buffer = vec![vec![0.0; WIDTH]; HEIGHT];
-    let offset_x = rand::random::<usize>() % 20;
-    let offset_y = rand::random::<usize>() % 10;
+    let offset_x = rand::rng().random_range(0..20);
+    let offset_y = rand::rng().random_range(0..10);
 
     let mut frame = 0;
     let is_endless = endless.unwrap_or(false);
