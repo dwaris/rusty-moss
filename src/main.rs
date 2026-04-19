@@ -44,6 +44,7 @@ fn build_bot_data() -> Result<BotData, Error> {
 fn framework_commands() -> Vec<poise::Command<BotData, Error>> {
     vec![
         fun::ping::ping(),
+        fun::pixel::pixel(),
         utility::help::help(),
         warframe::relic_lookup::lookup(),
         warframe::relic_farming::farm(),
