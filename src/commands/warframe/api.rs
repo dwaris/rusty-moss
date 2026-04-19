@@ -1,11 +1,17 @@
 use crate::{Context, Error};
+use serde::de::DeserializeOwned;
 
-pub async fn get_cached_json(ctx: &Context<'_>, url: &str) -> Result<serde_json::Value, Error> {
+pub async fn get_cached_json<T: DeserializeOwned + Clone + 'static>(
+    ctx: &Context<'_>,
+    url: &str,
+) -> Result<T, Error> {
     {
         let cache = ctx.data().warframe_cache.read().await;
         if let Some(cached) = cache.get(url) {
             if cached.fetched_at.elapsed() <= ctx.data().warframe_cache_ttl {
-                return Ok(cached.payload.clone());
+                if let Ok(val) = serde_json::from_value::<T>(cached.payload.clone()) {
+                    return Ok(val);
+                }
             }
         }
     }
@@ -13,7 +19,11 @@ pub async fn get_cached_json(ctx: &Context<'_>, url: &str) -> Result<serde_json:
     let response = ctx.data().http_client.get(url).send().await?;
 
     if !response.status().is_success() {
-        return Err(format!("Warframe API request failed with status {}", response.status()).into());
+        return Err(format!(
+            "Warframe API request failed with status {}",
+            response.status()
+        )
+        .into());
     }
 
     let payload: serde_json::Value = response.json().await?;
@@ -29,5 +39,5 @@ pub async fn get_cached_json(ctx: &Context<'_>, url: &str) -> Result<serde_json:
         );
     }
 
-    Ok(payload)
+    Ok(serde_json::from_value::<T>(payload)?)
 }

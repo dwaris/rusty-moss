@@ -9,13 +9,13 @@ use std::time::Duration;
 type RotationDrop = (String, String, f64);
 type MissionDrops = (String, Vec<RotationDrop>);
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct ApiResponse {
     #[serde(rename = "missionRewards")]
     mission_rewards: HashMap<String, HashMap<String, MissionData>>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct MissionData {
     #[serde(rename = "gameMode")]
     game_mode: String,
@@ -24,14 +24,14 @@ struct MissionData {
     rewards: MissionRewards,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
 enum MissionRewards {
     Rotations(HashMap<String, Vec<MissionReward>>),
     List(Vec<MissionReward>),
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct MissionReward {
     #[serde(rename = "itemName")]
     item_name: String,
@@ -117,17 +117,33 @@ fn collect_relic_name_suggestions(api_response: &ApiResponse, partial: &str) -> 
 }
 
 async fn farm_relic_autocomplete(ctx: Context<'_>, partial: &str) -> Vec<String> {
-    let payload = match get_cached_json(&ctx, "https://drops.warframestat.us/data/missionRewards.json").await {
-        Ok(payload) => payload,
-        Err(_) => return Vec::new(),
-    };
-
-    let api_response: ApiResponse = match serde_json::from_value(payload) {
+    let api_response: ApiResponse = match get_cached_json(&ctx, "https://drops.warframestat.us/data/missionRewards.json").await {
         Ok(response) => response,
         Err(_) => return Vec::new(),
     };
 
     collect_relic_name_suggestions(&api_response, partial)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_relic_name() {
+        assert_eq!(normalize_relic_name("lith a1"), Some("Lith A1".to_string()));
+        assert_eq!(normalize_relic_name("MESO B5"), Some("Meso B5".to_string()));
+        assert_eq!(normalize_relic_name("neo z8 relic"), Some("Neo Z8".to_string()));
+        assert_eq!(normalize_relic_name("Axi"), None);
+        assert_eq!(normalize_relic_name("Invalid Relic Name"), None);
+    }
+
+    #[test]
+    fn test_relic_name_from_item() {
+        assert_eq!(relic_name_from_item("Lith A1 Relic"), Some("Lith A1".to_string()));
+        assert_eq!(relic_name_from_item("Axi S9 Relic"), Some("Axi S9".to_string()));
+        assert_eq!(relic_name_from_item("Ash Prime Systems"), None);
+    }
 }
 
 fn page_components(current_page: usize, total_pages: usize) -> Vec<serenity::CreateActionRow> {
@@ -327,15 +343,13 @@ pub async fn farm(
     let relic_name = format!("{} Relic", normalized_relic);
     let search_term = relic_name.to_lowercase();
 
-    let payload = match get_cached_json(&ctx, "https://drops.warframestat.us/data/missionRewards.json").await {
-        Ok(payload) => payload,
+    let api_response: ApiResponse = match get_cached_json(&ctx, "https://drops.warframestat.us/data/missionRewards.json").await {
+        Ok(response) => response,
         Err(_) => {
             ctx.say("Failed to fetch mission data from API").await?;
             return Ok(());
         }
     };
-
-    let api_response: ApiResponse = serde_json::from_value(payload)?;
 
     let mut found_drops = collect_found_drops(api_response, &search_term);
 
