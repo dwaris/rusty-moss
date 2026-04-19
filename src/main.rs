@@ -25,6 +25,7 @@ pub struct BotData {
     http_client: reqwest::Client,
     warframe_cache: RwLock<HashMap<String, CachedPayload>>,
     warframe_cache_ttl: Duration,
+    relic_names_cache: RwLock<Option<(Instant, Vec<String>)>>,
 }
 
 fn build_bot_data() -> Result<BotData, Error> {
@@ -36,6 +37,7 @@ fn build_bot_data() -> Result<BotData, Error> {
         http_client,
         warframe_cache: RwLock::new(HashMap::new()),
         warframe_cache_ttl: Duration::from_secs(WARFRAME_CACHE_TTL_SECS),
+        relic_names_cache: RwLock::new(None),
     })
 }
 
@@ -43,7 +45,7 @@ fn framework_commands() -> Vec<poise::Command<BotData, Error>> {
     vec![
         fun::ping::ping(),
         utility::help::help(),
-        warframe::relic_lookup::relic(),
+        warframe::relic_lookup::lookup(),
         warframe::relic_farming::farm(),
     ]
 }

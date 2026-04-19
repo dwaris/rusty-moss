@@ -341,8 +341,8 @@ async fn handle_set_query(
 }
 
 /// Find which relics contain a specific prime item
-#[poise::command(slash_command, prefix_command, category = "Warframe")]
-pub async fn relic(
+#[poise::command(slash_command, prefix_command, category = "Warframe", rename = "lookup")]
+pub async fn lookup(
     ctx: Context<'_>,
     #[description = "Prime item to search for (e.g., 'Ash Prime Systems')"]
     #[autocomplete = "relic_item_autocomplete"]

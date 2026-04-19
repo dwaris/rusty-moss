@@ -5,13 +5,17 @@ use poise::serenity_prelude as serenity;
 use serde::Deserialize;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 type RotationDrop = (String, String, f64);
 type MissionDrops = (String, Vec<RotationDrop>);
 const MISSION_PAGE_SIZE: usize = 10;
 
-const FAST_GAME_MODES: &[&str] = &["Capture", "Exterminate", "Rescue", "Sabotage", "Spy"];
+const EFFICIENT_GAME_MODES: &[&str] = &[
+    "Capture",
+    "Disruption",
+    "Defense",
+];
 
 #[derive(Deserialize, Debug)]
 struct ApiResponse {
@@ -103,7 +107,7 @@ async fn fetch_mission_rewards(ctx: &Context<'_>) -> Result<ApiResponse, Error> 
     get_cached_json(ctx, "https://drops.warframestat.us/data/missionRewards.json").await
 }
 
-fn collect_relic_name_suggestions(api_response: &ApiResponse, partial: &str) -> Vec<String> {
+fn collect_relic_name_suggestions(api_response: &ApiResponse) -> Vec<String> {
     let mut unique = HashSet::new();
 
     for missions in api_response.mission_rewards.values() {
@@ -111,9 +115,7 @@ fn collect_relic_name_suggestions(api_response: &ApiResponse, partial: &str) -> 
             for_each_mission_reward(mission_data, |_, reward| {
                 if let Some(name) = relic_name_from_item(&reward.item_name) {
                     if let Some(normalized) = normalize_relic_name(&name) {
-                        if starts_with_ignore_case(&normalized, partial) {
-                            unique.insert(normalized);
-                        }
+                        unique.insert(normalized);
                     }
                 }
             });
@@ -122,17 +124,41 @@ fn collect_relic_name_suggestions(api_response: &ApiResponse, partial: &str) -> 
 
     let mut suggestions: Vec<String> = unique.into_iter().collect();
     suggestions.sort();
-    suggestions.truncate(25);
     suggestions
 }
 
 async fn farm_relic_autocomplete(ctx: Context<'_>, partial: &str) -> Vec<String> {
-    let api_response: ApiResponse = match fetch_mission_rewards(&ctx).await {
-        Ok(response) => response,
-        Err(_) => return Vec::new(),
+    let cached = {
+        let cache = ctx.data().relic_names_cache.read().await;
+        if let Some((instant, names)) = &*cache {
+            if instant.elapsed() < ctx.data().warframe_cache_ttl {
+                Some(names.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     };
 
-    collect_relic_name_suggestions(&api_response, partial)
+    let names = if let Some(names) = cached {
+        names
+    } else {
+        let api_response: ApiResponse = match fetch_mission_rewards(&ctx).await {
+            Ok(response) => response,
+            Err(_) => return Vec::new(),
+        };
+        let names = collect_relic_name_suggestions(&api_response);
+        let mut cache = ctx.data().relic_names_cache.write().await;
+        *cache = Some((Instant::now(), names.clone()));
+        names
+    };
+
+    names
+        .into_iter()
+        .filter(|n| starts_with_ignore_case(n, partial))
+        .take(25)
+        .collect()
 }
 
 fn page_components(current_page: usize, total_pages: usize) -> Vec<serenity::CreateActionRow> {
@@ -162,7 +188,7 @@ fn collect_found_drops(
                 continue;
             }
 
-            if fast_only && !FAST_GAME_MODES.contains(&mission_data.game_mode.as_str()) {
+            if fast_only && !EFFICIENT_GAME_MODES.contains(&mission_data.game_mode.as_str()) {
                 continue;
             }
 
@@ -306,7 +332,7 @@ async fn handle_page_interactions(
 #[poise::command(slash_command, prefix_command, category = "Warframe")]
 pub async fn farm(
     ctx: Context<'_>,
-    #[description = "Only show fast mission types (default true)"] fast_only: Option<bool>,
+    #[description = "Only show efficient mission types (default true)"] fast_only: Option<bool>,
     #[description = "Result page number (default 1)"] page: Option<usize>,
     #[description = "Relic to farm (e.g., 'Lith A1' or 'Axi S9')"]
     #[autocomplete = "farm_relic_autocomplete"]
@@ -339,7 +365,7 @@ pub async fn farm(
 
     if found_drops.is_empty() {
         let msg = if fast_only {
-            format!("❌ No fast missions found that drop **{}**. Try setting `fast_only` to false.", relic_name)
+            format!("❌ No efficient missions found that drop **{}**. Try setting `fast_only` to false.", relic_name)
         } else {
             format!("❌ No missions found that drop **{}**\n\nMake sure to use the format: 'Lith A1', 'Meso B5', 'Neo Z8', or 'Axi S9'. If the format is correct, this relic may not be in the current drop table.", relic_name)
         };
@@ -356,22 +382,23 @@ pub async fn farm(
     let total_pages = pages.len();
     let mut current_page = (requested_page - 1).min(total_pages - 1);
 
-    let message = ctx
-        .send(
-            poise::CreateReply::default()
-                .embed(create_page_embed(
-                    &relic_name,
-                    current_page,
-                    total_pages,
-                    &pages[current_page],
-                ))
-                .components(page_components(current_page, total_pages)),
-        )
-        .await?
-        .into_message()
-        .await?;
+    // Disable pagination by default if filtered, unless explicitly requested via page parameter
+    let use_pagination = !fast_only || page.is_some();
 
-    if total_pages > 1 {
+    let mut reply = poise::CreateReply::default().embed(create_page_embed(
+        &relic_name,
+        current_page,
+        total_pages,
+        &pages[current_page],
+    ));
+
+    if use_pagination && total_pages > 1 {
+        reply = reply.components(page_components(current_page, total_pages));
+    }
+
+    let message = ctx.send(reply).await?.into_message().await?;
+
+    if use_pagination && total_pages > 1 {
         handle_page_interactions(
             ctx,
             message,
