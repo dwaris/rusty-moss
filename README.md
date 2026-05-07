@@ -1,2 +1,2 @@
 # rusty-moss
-Discord-Bot written in Rust
+[Moved to GitLab](https://gitlab.com/ITClowd/rusty-moss)
