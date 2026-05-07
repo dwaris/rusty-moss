@@ -1,0 +1,12 @@
+stages:
+  - build-deploy_bot
+
+before_script:
+  - docker info
+
+deploy_rusty_moss:
+  stage: build-deploy_bot
+  script:
+    - docker compose -f /home/dwaris/docker-apps/docker-compose.yml up -d --build rusty-moss
+  only:
+    - main
