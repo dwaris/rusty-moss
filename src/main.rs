@@ -93,7 +93,56 @@ fn build_framework() -> poise::Framework<BotData, Error> {
             Box::pin(async move {
                 println!("Logged in as {}", ready.user.name);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                build_bot_data()
+                
+                let data = build_bot_data()?;
+
+                let ctx_clone = ctx.clone();
+                let http_client = data.http_client.clone();
+
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(Duration::from_secs(300));
+                    let upptime_url = env::var("UPPTIME_URL").unwrap_or_default();
+                    
+                    if upptime_url.is_empty() {
+                        println!("UPPTIME_URL not set. Skipping ...");
+                        return;
+                    }
+
+                    loop {
+                        match http_client.get(&upptime_url).send().await {
+                            Ok(response) => {
+                                match response.json::<serde_json::Value>().await {
+                                    Ok(json) => {
+                                        let is_up = if let Some(array) = json.as_array() {
+                                            array.iter().all(|item| item.get("status").and_then(|s| s.as_str()) == Some("up"))
+                                        } else {
+                                            json.get("status").and_then(|s| s.as_str()) == Some("up")
+                                        };
+                                        
+                                        let status_text = if is_up {
+                                            "🟢 All systems operational"
+                                        } else {
+                                            "🔴 Some systems offline"
+                                        };
+                                        
+                                        println!("Setting bot status to: {}", status_text);
+                                        ctx_clone.set_activity(Some(serenity::ActivityData::custom(status_text)));
+                                    }
+                                    Err(e) => {
+                                        println!("Failed to parse Upptime JSON: {}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                println!("Failed to fetch upptime status: {}", e);
+                            }
+                        }
+                        
+                        interval.tick().await;
+                    }
+                });
+
+                Ok(data)
             })
         })
         .options(build_framework_options())
