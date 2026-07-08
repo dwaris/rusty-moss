@@ -4,7 +4,7 @@ use std::time::Duration;
 
 pub fn start_uptime_loop(ctx: serenity::Context, http_client: reqwest::Client) {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(300));
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
         let upptime_url = env::var("UPPTIME_URL").unwrap_or_default();
         
         if upptime_url.is_empty() {
