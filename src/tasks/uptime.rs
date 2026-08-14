@@ -8,7 +8,7 @@ pub fn start_uptime_loop(ctx: serenity::Context, http_client: reqwest::Client) {
         let upptime_url = env::var("UPPTIME_URL").unwrap_or_default();
         
         if upptime_url.is_empty() {
-            println!("UPPTIME_URL not set. Skipping ...");
+            log::info!("UPPTIME_URL not set. Skipping uptime status task...");
             return;
         }
 
@@ -29,16 +29,16 @@ pub fn start_uptime_loop(ctx: serenity::Context, http_client: reqwest::Client) {
                                 "🔴 Some systems offline"
                             };
                             
-                            println!("Setting bot status to: {}", status_text);
+                            log::info!("Setting bot status to: {}", status_text);
                             ctx.set_activity(Some(serenity::ActivityData::custom(status_text)));
                         }
                         Err(e) => {
-                            println!("Failed to parse Upptime JSON: {}", e);
+                            log::error!("Failed to parse Upptime JSON: {}", e);
                         }
                     }
                 }
                 Err(e) => {
-                    println!("Failed to fetch upptime status: {}", e);
+                    log::error!("Failed to fetch upptime status: {}", e);
                 }
             }
             

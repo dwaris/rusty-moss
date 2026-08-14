@@ -66,18 +66,18 @@ fn build_framework_options() -> poise::FrameworkOptions<BotData, Error> {
         on_error: |error| Box::pin(on_error(error)),
         pre_command: |ctx| {
             Box::pin(async move {
-                println!("Executing command {}...", ctx.command().qualified_name);
+                log::info!("Executing command {}...", ctx.command().qualified_name);
             })
         },
         post_command: |ctx| {
             Box::pin(async move {
-                println!("Executed command {}!", ctx.command().qualified_name);
+                log::info!("Executed command {}!", ctx.command().qualified_name);
             })
         },
         skip_checks_for_owners: false,
         event_handler: |_ctx, event, _framework, _data| {
             Box::pin(async move {
-                println!(
+                log::trace!(
                     "Got an event in event handler: {:?}",
                     event.snake_case_name()
                 );
@@ -92,9 +92,9 @@ fn build_framework() -> poise::Framework<BotData, Error> {
     poise::Framework::builder()
         .setup(move |ctx, ready, framework| {
             Box::pin(async move {
-                println!("Logged in as {}", ready.user.name);
+                log::info!("Logged in as {}", ready.user.name);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                
+
                 let data = build_bot_data()?;
 
                 tasks::uptime::start_uptime_loop(ctx.clone(), data.http_client.clone());
@@ -114,16 +114,29 @@ fn discord_token() -> String {
     env::var("DISCORD_TOKEN").expect("No discord token found in environment variables")
 }
 
-
 async fn on_error(error: poise::FrameworkError<'_, BotData, Error>) {
     match error {
         poise::FrameworkError::Setup { error, .. } => panic!("Failed to start bot: {:?}", error),
         poise::FrameworkError::Command { error, ctx, .. } => {
-            println!("Error in command `{}`: {:?}", ctx.command().name, error,);
+            log::error!("Error in command `{}`: {:?}", ctx.command().name, error);
+            let _ = ctx.say(format!("An error occurred: {}", error)).await;
+        }
+        poise::FrameworkError::CooldownHit {
+            remaining_cooldown,
+            ctx,
+            ..
+        } => {
+            let _ = ctx
+                .say(format!(
+                    "Please wait {:.1}s before using `{}` again.",
+                    remaining_cooldown.as_secs_f32(),
+                    ctx.command().name
+                ))
+                .await;
         }
         error => {
             if let Err(e) = poise::builtins::on_error(error).await {
-                println!("Error while handling error: {}", e)
+                log::error!("Error while handling framework error: {}", e);
             }
         }
     }

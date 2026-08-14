@@ -1790,6 +1790,7 @@ version = "0.2.2"
 dependencies = [
  "dotenvy",
  "env_logger",
+ "log",
  "poise",
  "rand 0.10.2",
  "reqwest 0.13.4",
