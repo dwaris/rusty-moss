@@ -55,6 +55,7 @@ fn framework_commands() -> Vec<poise::Command<BotData, Error>> {
         utility::stats::stats(),
         warframe::relic_lookup::lookup(),
         warframe::relic_farming::farm(),
+        warframe::cycles::cycle(),
     ]
 }
 
