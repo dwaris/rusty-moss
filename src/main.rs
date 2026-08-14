@@ -17,18 +17,19 @@ const HTTP_TIMEOUT_SECS: u64 = 12;
 const DEFAULT_PREFIX: &str = "~";
 
 #[derive(Clone)]
-struct CachedPayload {
-    fetched_at: Instant,
-    payload: serde_json::Value,
+pub struct CachedPayload {
+    pub(crate) fetched_at: Instant,
+    pub(crate) payload: serde_json::Value,
 }
 
 pub struct BotData {
-    http_client: reqwest::Client,
-    warframe_cache: RwLock<HashMap<String, CachedPayload>>,
-    warframe_cache_ttl: Duration,
-    relic_names_cache: RwLock<Option<(Instant, Vec<String>)>>,
+    pub(crate) http_client: reqwest::Client,
+    pub(crate) warframe_cache: RwLock<HashMap<String, CachedPayload>>,
+    pub(crate) warframe_cache_ttl: Duration,
+    pub(crate) relic_names_cache: RwLock<Option<(Instant, Vec<String>)>>,
     // UserID -> Stop Signal Sender
-    active_animations: RwLock<HashMap<serenity::UserId, tokio::sync::watch::Sender<bool>>>,
+    pub(crate) active_animations: RwLock<HashMap<serenity::UserId, tokio::sync::watch::Sender<bool>>>,
+    pub(crate) start_time: Instant,
 }
 
 fn build_bot_data() -> Result<BotData, Error> {
@@ -42,15 +43,16 @@ fn build_bot_data() -> Result<BotData, Error> {
         warframe_cache_ttl: Duration::from_secs(WARFRAME_CACHE_TTL_SECS),
         relic_names_cache: RwLock::new(None),
         active_animations: RwLock::new(HashMap::new()),
+        start_time: Instant::now(),
     })
 }
 
 fn framework_commands() -> Vec<poise::Command<BotData, Error>> {
     vec![
-        fun::ping::ping(),
         fun::pixel::pixel(),
         fun::pixel::stop(),
         utility::help::help(),
+        utility::stats::stats(),
         warframe::relic_lookup::lookup(),
         warframe::relic_farming::farm(),
     ]
