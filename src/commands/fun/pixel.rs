@@ -400,3 +400,40 @@ pub async fn pixel(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use tokio::sync::RwLock;
+
+    #[tokio::test]
+    async fn test_active_animation_registration_and_cleanup() {
+        let active_animations = RwLock::new(HashMap::new());
+        let user_id = serenity::UserId::new(123456789);
+
+        let (tx, rx) = tokio::sync::watch::channel(false);
+
+        {
+            let mut active = active_animations.write().await;
+            if let Some(old_tx) = active.insert(user_id, tx) {
+                let _ = old_tx.send(true);
+            }
+        }
+
+        assert_eq!(active_animations.read().await.len(), 1);
+        assert!(!*rx.borrow());
+
+        {
+            let mut active = active_animations.write().await;
+            if let Some(current_tx) = active.get(&user_id) {
+                if !*rx.borrow() || current_tx.is_closed() {
+                    active.remove(&user_id);
+                }
+            }
+        }
+
+        assert_eq!(active_animations.read().await.len(), 0);
+        assert!(!active_animations.read().await.contains_key(&user_id));
+    }
+}
