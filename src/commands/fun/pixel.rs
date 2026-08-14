@@ -383,7 +383,7 @@ pub async fn pixel(
     {
         let mut active = ctx.data().active_animations.write().await;
         if let Some(current_tx) = active.get(&user_id) {
-            if current_tx.is_closed() || frame >= max_frames || *rx.borrow() {
+            if !*rx.borrow() || current_tx.is_closed() || frame >= max_frames {
                 active.remove(&user_id);
             }
         }
