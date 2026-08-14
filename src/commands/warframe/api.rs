@@ -30,6 +30,9 @@ pub async fn get_cached_json<T: DeserializeOwned + 'static>(
 
     {
         let mut cache = ctx.data().warframe_cache.write().await;
+        let ttl = ctx.data().warframe_cache_ttl;
+        cache.retain(|_, v| v.fetched_at.elapsed() <= ttl);
+
         cache.insert(
             url.to_string(),
             crate::CachedPayload {
