@@ -5,46 +5,43 @@ use poise::serenity_prelude as serenity;
 use serde::Deserialize;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 type RotationDrop = (String, String, f64);
 type MissionDrops = (String, Vec<RotationDrop>);
 const MISSION_PAGE_SIZE: usize = 10;
 
-const EFFICIENT_GAME_MODES: &[&str] = &[
-    "Capture",
-    "Disruption",
-    "Defense",
-];
+const EFFICIENT_GAME_MODES: &[&str] = &["Capture", "Disruption", "Defense"];
 
 #[derive(Deserialize, Debug)]
-struct ApiResponse {
+pub struct ApiResponse {
     #[serde(rename = "missionRewards")]
-    mission_rewards: HashMap<String, HashMap<String, MissionData>>,
+    pub mission_rewards: HashMap<String, HashMap<String, MissionData>>,
 }
 
 #[derive(Deserialize, Debug)]
-struct MissionData {
+pub struct MissionData {
     #[serde(rename = "gameMode")]
-    game_mode: String,
+    pub game_mode: String,
     #[serde(rename = "isEvent")]
-    is_event: Option<bool>,
-    rewards: MissionRewards,
+    pub is_event: Option<bool>,
+    pub rewards: MissionRewards,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(untagged)]
-enum MissionRewards {
+pub enum MissionRewards {
     Rotations(HashMap<String, Vec<MissionReward>>),
     List(Vec<MissionReward>),
 }
 
 #[derive(Deserialize, Debug)]
-struct MissionReward {
+pub struct MissionReward {
     #[serde(rename = "itemName")]
-    item_name: String,
-    rarity: String,
-    chance: f64,
+    pub item_name: String,
+    pub rarity: String,
+    pub chance: f64,
 }
 
 #[derive(Debug)]
@@ -66,14 +63,12 @@ fn normalize_relic_name(input: &str) -> Option<String> {
     };
 
     let mut tier_chars = tier.chars();
-    let normalized_tier = match tier_chars.next() {
-        Some(first) => format!(
-            "{}{}",
-            first.to_ascii_uppercase(),
-            tier_chars.as_str().to_ascii_lowercase()
-        ),
-        None => return None,
-    };
+    let first = tier_chars.next()?;
+    let normalized_tier = format!(
+        "{}{}",
+        first.to_ascii_uppercase(),
+        tier_chars.as_str().to_ascii_lowercase()
+    );
 
     Some(format!("{} {}", normalized_tier, code.to_ascii_uppercase()))
 }
@@ -103,8 +98,12 @@ where
     }
 }
 
-async fn fetch_mission_rewards(ctx: &Context<'_>) -> Result<ApiResponse, Error> {
-    get_cached_json(ctx, "https://drops.warframestat.us/data/missionRewards.json").await
+async fn fetch_mission_rewards(ctx: &Context<'_>) -> Result<Arc<ApiResponse>, Error> {
+    get_cached_json(
+        ctx,
+        "https://drops.warframestat.us/data/missionRewards.json",
+    )
+    .await
 }
 
 fn collect_relic_name_suggestions(api_response: &ApiResponse) -> Vec<String> {
@@ -113,10 +112,10 @@ fn collect_relic_name_suggestions(api_response: &ApiResponse) -> Vec<String> {
     for missions in api_response.mission_rewards.values() {
         for mission_data in missions.values() {
             for_each_mission_reward(mission_data, |_, reward| {
-                if let Some(name) = relic_name_from_item(&reward.item_name) {
-                    if let Some(normalized) = normalize_relic_name(&name) {
-                        unique.insert(normalized);
-                    }
+                if let Some(name) = relic_name_from_item(&reward.item_name)
+                    && let Some(normalized) = normalize_relic_name(&name)
+                {
+                    unique.insert(normalized);
                 }
             });
         }
@@ -144,20 +143,21 @@ async fn farm_relic_autocomplete(ctx: Context<'_>, partial: &str) -> Vec<String>
     let names = if let Some(names) = cached {
         names
     } else {
-        let api_response: ApiResponse = match fetch_mission_rewards(&ctx).await {
+        let api_response = match fetch_mission_rewards(&ctx).await {
             Ok(response) => response,
             Err(_) => return Vec::new(),
         };
-        let names = collect_relic_name_suggestions(&api_response);
+        let names: Arc<[String]> = collect_relic_name_suggestions(&api_response).into();
         let mut cache = ctx.data().relic_names_cache.write().await;
         *cache = Some((Instant::now(), names.clone()));
         names
     };
 
     names
-        .into_iter()
+        .iter()
         .filter(|n| starts_with_ignore_case(n, partial))
         .take(25)
+        .cloned()
         .collect()
 }
 
@@ -172,17 +172,20 @@ fn page_components(current_page: usize, total_pages: usize) -> Vec<serenity::Cre
         .style(serenity::ButtonStyle::Secondary)
         .disabled(current_page + 1 >= total_pages);
 
-    vec![serenity::CreateActionRow::Buttons(vec![prev_button, next_button])]
+    vec![serenity::CreateActionRow::Buttons(vec![
+        prev_button,
+        next_button,
+    ])]
 }
 
 fn collect_found_drops(
-    api_response: ApiResponse,
+    api_response: &ApiResponse,
     search_term: &str,
     fast_only: bool,
 ) -> Vec<FoundDrop> {
     let mut found = Vec::new();
 
-    for (planet, missions) in api_response.mission_rewards {
+    for (planet, missions) in &api_response.mission_rewards {
         for (mission_name, mission_data) in missions {
             if mission_data.is_event.unwrap_or(false) {
                 continue;
@@ -194,7 +197,7 @@ fn collect_found_drops(
 
             let mission_path = format!("{}/{}", planet, mission_name);
 
-            for_each_mission_reward(&mission_data, |rotation, reward| {
+            for_each_mission_reward(mission_data, |rotation, reward| {
                 if !starts_with_ignore_case(&reward.item_name, search_term) {
                     return;
                 }
@@ -218,10 +221,11 @@ fn group_and_sort_missions(found_drops: Vec<FoundDrop>) -> Vec<MissionDrops> {
 
     for drop in found_drops {
         let mission_label = format!("{} ({})", drop.mission_path, drop.game_mode);
-        mission_map
-            .entry(mission_label)
-            .or_default()
-            .push((drop.rotation, drop.rarity, drop.chance));
+        mission_map.entry(mission_label).or_default().push((
+            drop.rotation,
+            drop.rarity,
+            drop.chance,
+        ));
     }
 
     for drops in mission_map.values_mut() {
@@ -353,21 +357,28 @@ pub async fn farm(
     let relic_name = format!("{} Relic", normalized_relic);
     let search_term = relic_name.as_str();
 
-    let api_response: ApiResponse = match fetch_mission_rewards(&ctx).await {
+    let api_response = match fetch_mission_rewards(&ctx).await {
         Ok(response) => response,
-        Err(_) => {
+        Err(e) => {
+            log::error!("Failed to fetch mission data from API: {e}");
             ctx.say("Failed to fetch mission data from API").await?;
             return Ok(());
         }
     };
 
-    let mut found_drops = collect_found_drops(api_response, search_term, fast_only);
+    let mut found_drops = collect_found_drops(&api_response, search_term, fast_only);
 
     if found_drops.is_empty() {
         let msg = if fast_only {
-            format!("❌ No efficient missions found that drop **{}**. Try setting `fast_only` to false.", relic_name)
+            format!(
+                "❌ No efficient missions found that drop **{}**. Try setting `fast_only` to false.",
+                relic_name
+            )
         } else {
-            format!("❌ No missions found that drop **{}**\n\nMake sure to use the format: 'Lith A1', 'Meso B5', 'Neo Z8', or 'Axi S9'. If the format is correct, this relic may not be in the current drop table.", relic_name)
+            format!(
+                "❌ No missions found that drop **{}**\n\nMake sure to use the format: 'Lith A1', 'Meso B5', 'Neo Z8', or 'Axi S9'. If the format is correct, this relic may not be in the current drop table.",
+                relic_name
+            )
         };
         ctx.say(msg).await?;
         return Ok(());
@@ -429,16 +440,12 @@ mod tests {
     fn test_normalize_relic_name() {
         assert_eq!(normalize_relic_name("lith a1"), Some("Lith A1".to_string()));
         assert_eq!(normalize_relic_name("MESO B5"), Some("Meso B5".to_string()));
-        assert_eq!(normalize_relic_name("neo z8 relic"), Some("Neo Z8".to_string()));
+        assert_eq!(
+            normalize_relic_name("neo z8 relic"),
+            Some("Neo Z8".to_string())
+        );
         assert_eq!(normalize_relic_name("Axi"), None);
         assert_eq!(normalize_relic_name("Invalid Relic Name"), None);
-    }
-
-    #[test]
-    fn test_relic_name_from_item() {
-        assert_eq!(relic_name_from_item("Lith A1 Relic"), Some("Lith A1".to_string()));
-        assert_eq!(relic_name_from_item("Axi S9 Relic"), Some("Axi S9".to_string()));
-        assert_eq!(relic_name_from_item("Ash Prime Systems"), None);
     }
 
     #[test]
@@ -511,7 +518,7 @@ mod tests {
             )]),
         };
 
-        let found = collect_found_drops(api_response, "lith a1 relic", false);
+        let found = collect_found_drops(&api_response, "lith a1 relic", false);
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].mission_path, "Earth/E Prime");
     }

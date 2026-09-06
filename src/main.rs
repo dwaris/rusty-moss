@@ -16,19 +16,23 @@ const WARFRAME_CACHE_TTL_SECS: u64 = 120;
 const HTTP_TIMEOUT_SECS: u64 = 12;
 const DEFAULT_PREFIX: &str = "~";
 
+use std::any::Any;
+use std::sync::Arc;
+
 #[derive(Clone)]
-pub struct CachedPayload {
+pub struct CachedItem {
     pub(crate) fetched_at: Instant,
-    pub(crate) payload: serde_json::Value,
+    pub(crate) data: Arc<dyn Any + Send + Sync>,
 }
 
 pub struct BotData {
     pub(crate) http_client: reqwest::Client,
-    pub(crate) warframe_cache: RwLock<HashMap<String, CachedPayload>>,
+    pub(crate) warframe_cache: RwLock<HashMap<String, CachedItem>>,
     pub(crate) warframe_cache_ttl: Duration,
-    pub(crate) relic_names_cache: RwLock<Option<(Instant, Vec<String>)>>,
+    pub(crate) relic_names_cache: RwLock<Option<(Instant, Arc<[String]>)>>,
     // UserID -> Stop Signal Sender
-    pub(crate) active_animations: RwLock<HashMap<serenity::UserId, tokio::sync::watch::Sender<bool>>>,
+    pub(crate) active_animations:
+        RwLock<HashMap<serenity::UserId, tokio::sync::watch::Sender<bool>>>,
     pub(crate) start_time: Instant,
 }
 

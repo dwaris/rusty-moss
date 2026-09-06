@@ -1,16 +1,36 @@
 use poise::serenity_prelude as serenity;
+use serde::Deserialize;
 use std::env;
 use std::time::Duration;
 
-pub fn parse_upptime_status(json: &serde_json::Value) -> bool {
-    if let Some(array) = json.as_array() {
-        !array.is_empty()
-            && array
-                .iter()
-                .all(|item| item.get("status").and_then(|s| s.as_str()) == Some("up"))
-    } else {
-        json.get("status").and_then(|s| s.as_str()) == Some("up")
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct MonitorStatus {
+    pub status: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum UpptimeResponse {
+    List(Vec<MonitorStatus>),
+    Single(MonitorStatus),
+}
+
+impl UpptimeResponse {
+    pub fn is_up(&self) -> bool {
+        match self {
+            UpptimeResponse::List(monitors) => {
+                !monitors.is_empty() && monitors.iter().all(|m| m.status == "up")
+            }
+            UpptimeResponse::Single(monitor) => monitor.status == "up",
+        }
     }
+}
+
+#[cfg(test)]
+pub fn parse_upptime_status(json: &serde_json::Value) -> bool {
+    serde_json::from_value::<UpptimeResponse>(json.clone())
+        .map(|resp| resp.is_up())
+        .unwrap_or(false)
 }
 
 pub fn start_uptime_loop(ctx: serenity::Context, http_client: reqwest::Client) {
@@ -25,25 +45,23 @@ pub fn start_uptime_loop(ctx: serenity::Context, http_client: reqwest::Client) {
 
         loop {
             match http_client.get(&upptime_url).send().await {
-                Ok(response) => {
-                    match response.json::<serde_json::Value>().await {
-                        Ok(json) => {
-                            let is_up = parse_upptime_status(&json);
+                Ok(response) => match response.json::<UpptimeResponse>().await {
+                    Ok(data) => {
+                        let is_up = data.is_up();
 
-                            let status_text = if is_up {
-                                "🟢 All systems operational"
-                            } else {
-                                "🔴 Some systems offline"
-                            };
+                        let status_text = if is_up {
+                            "🟢 All systems operational"
+                        } else {
+                            "🔴 Some systems offline"
+                        };
 
-                            log::info!("Setting bot status to: {}", status_text);
-                            ctx.set_activity(Some(serenity::ActivityData::custom(status_text)));
-                        }
-                        Err(e) => {
-                            log::error!("Failed to parse Upptime JSON: {}", e);
-                        }
+                        log::info!("Setting bot status to: {}", status_text);
+                        ctx.set_activity(Some(serenity::ActivityData::custom(status_text)));
                     }
-                }
+                    Err(e) => {
+                        log::error!("Failed to parse Upptime JSON: {}", e);
+                    }
+                },
                 Err(e) => {
                     log::error!("Failed to fetch upptime status: {}", e);
                 }

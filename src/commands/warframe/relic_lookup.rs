@@ -6,31 +6,61 @@ use serde::Deserialize;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
+use std::sync::Arc;
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RelicState {
+    Intact,
+    Exceptional,
+    Flawless,
+    Radiant,
+    #[serde(other)]
+    Unknown,
+}
+
+impl std::fmt::Display for RelicState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RelicState::Intact => write!(f, "Intact"),
+            RelicState::Exceptional => write!(f, "Exceptional"),
+            RelicState::Flawless => write!(f, "Flawless"),
+            RelicState::Radiant => write!(f, "Radiant"),
+            RelicState::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
+const RELIC_STATES: [RelicState; 4] = [
+    RelicState::Intact,
+    RelicState::Exceptional,
+    RelicState::Flawless,
+    RelicState::Radiant,
+];
+
 #[derive(Deserialize, Debug)]
-struct RelicResponse {
-    relics: Vec<Relic>,
+pub struct RelicResponse {
+    pub relics: Vec<Relic>,
 }
 
 #[derive(Deserialize, Debug)]
-struct Relic {
+pub struct Relic {
     #[serde(rename = "_id")]
-    _id: String,
-    tier: String,
+    pub _id: String,
+    pub tier: String,
     #[serde(rename = "relicName", alias = "name", default)]
-    relic_name: Option<String>,
-    state: String,
-    rewards: Vec<RelicReward>,
+    pub relic_name: Option<String>,
+    pub state: RelicState,
+    pub rewards: Vec<RelicReward>,
 }
 
 #[derive(Deserialize, Debug)]
-struct RelicReward {
+pub struct RelicReward {
     #[serde(rename = "itemName")]
-    item_name: String,
-    chance: f64,
+    pub item_name: String,
+    pub chance: f64,
 }
 
 type RelicEntry = (String, Vec<FoundRelic>);
-const RELIC_STATES: [&str; 4] = ["Intact", "Exceptional", "Flawless", "Radiant"];
 
 fn extract_prime_set_name(item_name: &str) -> Option<String> {
     let tokens: Vec<&str> = item_name.split_whitespace().collect();
@@ -130,25 +160,15 @@ async fn relic_item_autocomplete(ctx: Context<'_>, partial: &str) -> Vec<String>
     collect_item_suggestions(&relics, partial)
 }
 
-fn state_order(state: &str) -> usize {
-    match state {
-        "Intact" => 0,
-        "Exceptional" => 1,
-        "Flawless" => 2,
-        "Radiant" => 3,
-        _ => 4,
-    }
-}
-
 #[derive(Debug)]
 struct FoundRelic {
     tier: String,
     relic_name: String,
-    state: String,
+    state: RelicState,
     chance: f64,
 }
 
-async fn fetch_relics(ctx: &Context<'_>) -> Result<RelicResponse, Error> {
+async fn fetch_relics(ctx: &Context<'_>) -> Result<Arc<RelicResponse>, Error> {
     get_cached_json(ctx, "https://drops.warframestat.us/data/relics.json").await
 }
 
@@ -166,7 +186,7 @@ fn collect_matching_relics(relics: &RelicResponse, search_term: &str) -> Vec<Fou
                 found.push(FoundRelic {
                     tier: relic.tier.clone(),
                     relic_name: relic_name.clone(),
-                    state: relic.state.clone(),
+                    state: relic.state,
                     chance: reward.chance,
                 });
             }
@@ -207,7 +227,7 @@ fn format_state_chances(entries: &[FoundRelic]) -> String {
 
     for state in RELIC_STATES {
         if let Some(entry) = entries.iter().find(|entry| entry.state == state) {
-            state_parts.push(format!("{} {:.2}%", state, entry.chance));
+            state_parts.push(format!("{state} {:.2}%", entry.chance));
         }
     }
 
@@ -292,7 +312,7 @@ fn sort_relics(found_relics: &mut [FoundRelic]) {
         a.tier
             .cmp(&b.tier)
             .then_with(|| a.relic_name.cmp(&b.relic_name))
-            .then_with(|| state_order(&a.state).cmp(&state_order(&b.state)))
+            .then_with(|| a.state.cmp(&b.state))
             .then_with(|| b.chance.partial_cmp(&a.chance).unwrap_or(Ordering::Equal))
     });
 }
@@ -301,11 +321,11 @@ fn group_relics(found_relics: Vec<FoundRelic>) -> Vec<RelicEntry> {
     let mut grouped: Vec<RelicEntry> = Vec::new();
 
     for relic in found_relics {
-        if let Some((last_name, entries)) = grouped.last_mut() {
-            if *last_name == relic.relic_name {
-                entries.push(relic);
-                continue;
-            }
+        if let Some((last_name, entries)) = grouped.last_mut()
+            && *last_name == relic.relic_name
+        {
+            entries.push(relic);
+            continue;
         }
 
         grouped.push((relic.relic_name.clone(), vec![relic]));
@@ -341,7 +361,12 @@ async fn handle_set_query(
 }
 
 /// Find which relics contain a specific prime item
-#[poise::command(slash_command, prefix_command, category = "Warframe", rename = "lookup")]
+#[poise::command(
+    slash_command,
+    prefix_command,
+    category = "Warframe",
+    rename = "lookup"
+)]
 pub async fn lookup(
     ctx: Context<'_>,
     #[description = "Prime item to search for (e.g., 'Ash Prime Systems')"]
@@ -353,7 +378,8 @@ pub async fn lookup(
 
     let relics = match fetch_relics(&ctx).await {
         Ok(relics) => relics,
-        Err(_) => {
+        Err(e) => {
+            log::error!("Failed to fetch relic data from API: {e}");
             ctx.say("Failed to fetch relic data from API").await?;
             return Ok(());
         }
@@ -387,17 +413,32 @@ mod tests {
 
     #[test]
     fn test_extract_prime_set_name() {
-        assert_eq!(extract_prime_set_name("Ash Prime Systems"), Some("Ash Prime".to_string()));
-        assert_eq!(extract_prime_set_name("Ash Prime"), Some("Ash Prime".to_string()));
-        assert_eq!(extract_prime_set_name("Braton Prime Barrel"), Some("Braton Prime".to_string()));
+        assert_eq!(
+            extract_prime_set_name("Ash Prime Systems"),
+            Some("Ash Prime".to_string())
+        );
+        assert_eq!(
+            extract_prime_set_name("Ash Prime"),
+            Some("Ash Prime".to_string())
+        );
+        assert_eq!(
+            extract_prime_set_name("Braton Prime Barrel"),
+            Some("Braton Prime".to_string())
+        );
         assert_eq!(extract_prime_set_name("Forma BP"), None);
         assert_eq!(extract_prime_set_name("Prime Part"), None);
     }
 
     #[test]
     fn test_parse_prime_set_query() {
-        assert_eq!(parse_prime_set_query("Ash Prime Set"), Some("Ash Prime".to_string()));
-        assert_eq!(parse_prime_set_query("Ash Prime"), Some("Ash Prime".to_string()));
+        assert_eq!(
+            parse_prime_set_query("Ash Prime Set"),
+            Some("Ash Prime".to_string())
+        );
+        assert_eq!(
+            parse_prime_set_query("Ash Prime"),
+            Some("Ash Prime".to_string())
+        );
         assert_eq!(parse_prime_set_query("Ash"), None);
         assert_eq!(parse_prime_set_query("Prime Set"), None);
     }
@@ -418,9 +459,10 @@ mod tests {
 
     #[test]
     fn test_state_order() {
-        assert_eq!(state_order("Intact"), 0);
-        assert_eq!(state_order("Radiant"), 3);
-        assert_eq!(state_order("Unknown"), 4);
+        assert!(RelicState::Intact < RelicState::Exceptional);
+        assert!(RelicState::Exceptional < RelicState::Flawless);
+        assert!(RelicState::Flawless < RelicState::Radiant);
+        assert!(RelicState::Radiant < RelicState::Unknown);
     }
 
     #[test]
@@ -429,13 +471,13 @@ mod tests {
             FoundRelic {
                 tier: "Lith".to_string(),
                 relic_name: "Lith A1".to_string(),
-                state: "Radiant".to_string(),
+                state: RelicState::Radiant,
                 chance: 10.0,
             },
             FoundRelic {
                 tier: "Lith".to_string(),
                 relic_name: "Lith A1".to_string(),
-                state: "Intact".to_string(),
+                state: RelicState::Intact,
                 chance: 2.0,
             },
         ];
@@ -454,7 +496,7 @@ mod tests {
                     _id: "1".to_string(),
                     tier: "Lith".to_string(),
                     relic_name: Some("A1".to_string()),
-                    state: "Intact".to_string(),
+                    state: RelicState::Intact,
                     rewards: vec![RelicReward {
                         item_name: "Ash Prime Systems".to_string(),
                         chance: 2.0,
@@ -464,7 +506,7 @@ mod tests {
                     _id: "2".to_string(),
                     tier: "Lith".to_string(),
                     relic_name: Some("A1".to_string()),
-                    state: "Radiant".to_string(),
+                    state: RelicState::Radiant,
                     rewards: vec![RelicReward {
                         item_name: "Ash Prime Systems".to_string(),
                         chance: 10.0,

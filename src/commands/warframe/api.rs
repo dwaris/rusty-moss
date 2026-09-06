@@ -1,24 +1,24 @@
 use crate::{Context, Error};
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
-pub fn prune_cache(cache: &mut HashMap<String, crate::CachedPayload>, ttl: Duration) {
+pub fn prune_cache(cache: &mut HashMap<String, crate::CachedItem>, ttl: Duration) {
     cache.retain(|_, v| v.fetched_at.elapsed() <= ttl);
 }
 
-pub async fn get_cached_json<T: DeserializeOwned + 'static>(
+pub async fn get_cached_json<T: DeserializeOwned + Send + Sync + 'static>(
     ctx: &Context<'_>,
     url: &str,
-) -> Result<T, Error> {
+) -> Result<Arc<T>, Error> {
     {
         let cache = ctx.data().warframe_cache.read().await;
-        if let Some(cached) = cache.get(url) {
-            if cached.fetched_at.elapsed() <= ctx.data().warframe_cache_ttl {
-                if let Ok(val) = serde_json::from_value::<T>(cached.payload.clone()) {
-                    return Ok(val);
-                }
-            }
+        if let Some(cached) = cache.get(url)
+            && cached.fetched_at.elapsed() <= ctx.data().warframe_cache_ttl
+            && let Ok(val) = cached.data.clone().downcast::<T>()
+        {
+            return Ok(val);
         }
     }
 
@@ -26,13 +26,17 @@ pub async fn get_cached_json<T: DeserializeOwned + 'static>(
 
     if !response.status().is_success() {
         return Err(format!(
-            "Warframe API request failed with status {}",
+            "Warframe API request to {url} failed with status {}",
             response.status()
         )
         .into());
     }
 
-    let payload: serde_json::Value = response.json().await?;
+    let parsed: T = response.json().await.map_err(|e| {
+        log::error!("Failed to deserialize API response from {url}: {e}");
+        e
+    })?;
+    let data = Arc::new(parsed);
 
     {
         let mut cache = ctx.data().warframe_cache.write().await;
@@ -41,14 +45,14 @@ pub async fn get_cached_json<T: DeserializeOwned + 'static>(
 
         cache.insert(
             url.to_string(),
-            crate::CachedPayload {
+            crate::CachedItem {
                 fetched_at: std::time::Instant::now(),
-                payload: payload.clone(),
+                data: data.clone(),
             },
         );
     }
 
-    Ok(serde_json::from_value::<T>(payload)?)
+    Ok(data)
 }
 
 #[cfg(test)]
@@ -63,17 +67,17 @@ mod tests {
 
         cache.insert(
             "https://api.example.com/fresh".to_string(),
-            crate::CachedPayload {
+            crate::CachedItem {
                 fetched_at: Instant::now(),
-                payload: serde_json::json!({"status": "fresh"}),
+                data: Arc::new("fresh".to_string()),
             },
         );
 
         cache.insert(
             "https://api.example.com/expired".to_string(),
-            crate::CachedPayload {
+            crate::CachedItem {
                 fetched_at: Instant::now() - Duration::from_secs(20),
-                payload: serde_json::json!({"status": "expired"}),
+                data: Arc::new("expired".to_string()),
             },
         );
 
