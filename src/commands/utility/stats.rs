@@ -37,10 +37,7 @@ pub async fn stats(
             .footer(serenity::CreateEmbedFooter::new("rusty-moss"));
 
         reply
-            .edit(
-                ctx,
-                poise::CreateReply::default().embed(embed).content(""),
-            )
+            .edit(ctx, poise::CreateReply::default().embed(embed).content(""))
             .await?;
     } else {
         reply

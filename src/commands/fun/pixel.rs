@@ -1,6 +1,6 @@
 use crate::{Context, Error};
 use poise::serenity_prelude as serenity;
-use rand::RngExt;
+use rand::Rng;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -62,19 +62,19 @@ fn render_matrix(frame: usize, drops: &mut [usize]) -> String {
         let speed = (x % 2) + 1;
         let head = (drops[x] + frame * speed) % (HEIGHT + 4);
 
-        for y in 0..HEIGHT {
+        for (y, row) in buffer.iter_mut().enumerate() {
             if y == head {
                 let char_idx = (frame + x + y) % MATRIX_CHARS.len();
-                buffer[y][x] = (MATRIX_CHARS[char_idx] as char, 1);
+                row[x] = (MATRIX_CHARS[char_idx] as char, 1);
             } else if head >= y && head - y < 4 {
                 let tail_dist = head - y;
                 let char_idx = (frame + x + y) % MATRIX_CHARS.len();
                 let c = MATRIX_CHARS[char_idx] as char;
 
                 if tail_dist < 2 {
-                    buffer[y][x] = (c, 2);
+                    row[x] = (c, 2);
                 } else {
-                    buffer[y][x] = (c, 3);
+                    row[x] = (c, 3);
                 }
             }
         }
@@ -88,20 +88,29 @@ fn render_matrix(frame: usize, drops: &mut [usize]) -> String {
 
 // --- SHADER: FIRE ---
 fn render_fire(_frame: usize, fire_buffer: &mut [Vec<f64>]) -> String {
+    let mut rng = rand::thread_rng();
     for y in 0..HEIGHT - 1 {
         for x in 0..WIDTH {
-            let left = if x > 0 { fire_buffer[y + 1][x - 1] } else { 0.0 };
-            let right = if x < WIDTH - 1 { fire_buffer[y + 1][x + 1] } else { 0.0 };
+            let left = if x > 0 {
+                fire_buffer[y + 1][x - 1]
+            } else {
+                0.0
+            };
+            let right = if x < WIDTH - 1 {
+                fire_buffer[y + 1][x + 1]
+            } else {
+                0.0
+            };
             let mid = fire_buffer[y + 1][x];
 
-            let cooling = rand::rng().random::<f64>() * 0.12;
+            let cooling = rng.gen_range(0.0..0.12);
             fire_buffer[y][x] = ((left + right + mid) / 3.0 - cooling).clamp(0.0, 1.0);
         }
     }
 
-    for x in 0..WIDTH {
-        let fuel = (rand::rng().random::<f64>() * 0.6) + 0.4;
-        fire_buffer[HEIGHT - 1][x] = fuel;
+    for cell in &mut fire_buffer[HEIGHT - 1] {
+        let fuel = rng.gen_range(0.4..1.0);
+        *cell = fuel;
     }
 
     let mut buffer = vec![vec![(' ', 0u8); WIDTH]; HEIGHT];
@@ -217,7 +226,7 @@ fn render_starfield(_frame: usize, stars: &mut [(usize, usize, u8)]) -> String {
 
         if *x < step {
             *x = WIDTH - 1;
-            *y = rand::rng().random_range(0..HEIGHT);
+            *y = rand::thread_rng().gen_range(0..HEIGHT);
         } else {
             *x -= step;
         }
@@ -229,10 +238,7 @@ fn render_starfield(_frame: usize, stars: &mut [(usize, usize, u8)]) -> String {
         buffer[*y][*x] = (c, style);
     }
 
-    render_styled_buffer(
-        &buffer,
-        &[STYLE_RESET, "\x1b[1;37m", "\x1b[0;36m"],
-    )
+    render_styled_buffer(&buffer, &[STYLE_RESET, "\x1b[1;37m", "\x1b[0;36m"])
 }
 
 // --- SHADER: RAIN (SIMPLE) ---
@@ -252,10 +258,7 @@ fn render_rain(_frame: usize, drops: &mut [(usize, usize, u8)]) -> String {
         }
     }
 
-    render_styled_buffer(
-        &buffer,
-        &[STYLE_RESET, "\x1b[1;36m", "\x1b[0;36m"],
-    )
+    render_styled_buffer(&buffer, &[STYLE_RESET, "\x1b[1;36m", "\x1b[0;36m"])
 }
 
 /// Stop any ongoing animation you have running
@@ -291,34 +294,40 @@ pub async fn pixel(
         }
     }
 
-    let mut drops = vec![0; WIDTH];
-    for drop in &mut drops {
-        *drop = rand::rng().random_range(0..HEIGHT);
-    }
+    let (mut drops, mut fire_buffer, offset_x, offset_y, mut stars, mut rain_drops) = {
+        let mut rng = rand::thread_rng();
 
-    let mut fire_buffer = vec![vec![0.0; WIDTH]; HEIGHT];
-    let offset_x = rand::rng().random_range(0..15);
-    let offset_y = rand::rng().random_range(0..5);
+        let mut drops = vec![0; WIDTH];
+        for drop in &mut drops {
+            *drop = rng.gen_range(0..HEIGHT);
+        }
 
-    let mut stars: Vec<(usize, usize, u8)> = (0..16)
-        .map(|_| {
-            (
-                rand::rng().random_range(0..WIDTH),
-                rand::rng().random_range(0..HEIGHT),
-                rand::rng().random_range(1..=2),
-            )
-        })
-        .collect();
+        let fire_buffer = vec![vec![0.0; WIDTH]; HEIGHT];
+        let offset_x = rng.gen_range(0..15);
+        let offset_y = rng.gen_range(0..5);
 
-    let mut rain_drops: Vec<(usize, usize, u8)> = (0..16)
-        .map(|_| {
-            (
-                rand::rng().random_range(0..WIDTH),
-                rand::rng().random_range(0..HEIGHT),
-                rand::rng().random_range(1..=2),
-            )
-        })
-        .collect();
+        let stars: Vec<(usize, usize, u8)> = (0..16)
+            .map(|_| {
+                (
+                    rng.gen_range(0..WIDTH),
+                    rng.gen_range(0..HEIGHT),
+                    rng.gen_range(1..=2),
+                )
+            })
+            .collect();
+
+        let rain_drops: Vec<(usize, usize, u8)> = (0..16)
+            .map(|_| {
+                (
+                    rng.gen_range(0..WIDTH),
+                    rng.gen_range(0..HEIGHT),
+                    rng.gen_range(1..=2),
+                )
+            })
+            .collect();
+
+        (drops, fire_buffer, offset_x, offset_y, stars, rain_drops)
+    };
 
     let mut frame = 0;
     let is_endless = endless.unwrap_or(false);
@@ -349,7 +358,7 @@ pub async fn pixel(
             AnimationType::Rain => render_rain(frame, &mut rain_drops),
         };
 
-        if let Err(_) = message
+        if message
             .edit(
                 ctx.serenity_context(),
                 serenity::EditMessage::new()
@@ -357,6 +366,7 @@ pub async fn pixel(
                     .components(vec![action_row.clone()]),
             )
             .await
+            .is_err()
         {
             break;
         }
@@ -367,14 +377,14 @@ pub async fn pixel(
         tokio::select! {
             _ = sleep(Duration::from_millis(1250)) => {},
             interaction = collector => {
-                if let Some(press) = interaction {
-                    if press.data.custom_id == stop_button_id {
-                        let _ = press.create_response(
-                            ctx.serenity_context(),
-                            serenity::CreateInteractionResponse::Acknowledge,
-                        ).await;
-                        break;
-                    }
+                if let Some(press) = interaction
+                    && press.data.custom_id == stop_button_id
+                {
+                    let _ = press.create_response(
+                        ctx.serenity_context(),
+                        serenity::CreateInteractionResponse::Acknowledge,
+                    ).await;
+                    break;
                 }
             }
         }
@@ -382,10 +392,10 @@ pub async fn pixel(
 
     {
         let mut active = ctx.data().active_animations.write().await;
-        if let Some(current_tx) = active.get(&user_id) {
-            if !*rx.borrow() || current_tx.is_closed() || frame >= max_frames {
-                active.remove(&user_id);
-            }
+        if let Some(current_tx) = active.get(&user_id)
+            && (!*rx.borrow() || current_tx.is_closed() || frame >= max_frames)
+        {
+            active.remove(&user_id);
         }
     }
 
