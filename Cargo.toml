@@ -2,7 +2,7 @@
 name = "rusty-moss"
 version = "0.3.0"
 authors = ["dwaris <dwaris@itclowd.de>"]
-license = "BSD-2-Clause"
+license = "MIT"
 edition = "2024"
 
 [dependencies]
