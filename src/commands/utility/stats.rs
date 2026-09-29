@@ -2,6 +2,15 @@ use crate::{Context, Error};
 use poise::serenity_prelude as serenity;
 use std::time::Instant;
 
+pub fn format_duration(total_secs: u64) -> String {
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    format!("{days}d {hours}h {minutes}m {seconds}s")
+}
+
 /// Check bot response latency and system status
 #[poise::command(prefix_command, track_edits, slash_command, category = "Utility")]
 pub async fn stats(
@@ -16,13 +25,7 @@ pub async fn stats(
 
     if verbose.unwrap_or(false) {
         let uptime_secs = ctx.data().start_time.elapsed().as_secs();
-
-        let days = uptime_secs / 86400;
-        let hours = (uptime_secs % 86400) / 3600;
-        let minutes = (uptime_secs % 3600) / 60;
-        let seconds = uptime_secs % 60;
-
-        let uptime_formatted = format!("{days}d {hours}h {minutes}m {seconds}s");
+        let uptime_formatted = format_duration(uptime_secs);
         let active_anims = ctx.data().active_animations.read().await.len();
         let guild_count = ctx.serenity_context().cache.guild_count();
 
@@ -52,3 +55,17 @@ pub async fn stats(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_duration() {
+        assert_eq!(format_duration(0), "0d 0h 0m 0s");
+        assert_eq!(format_duration(65), "0d 0h 1m 5s");
+        assert_eq!(format_duration(3665), "0d 1h 1m 5s");
+        assert_eq!(format_duration(90065), "1d 1h 1m 5s");
+    }
+}
+
