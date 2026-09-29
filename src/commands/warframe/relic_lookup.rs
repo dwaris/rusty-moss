@@ -384,6 +384,44 @@ async fn handle_set_query(
     send_embeds(ctx, embeds).await
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelicSearchQuery {
+    PrimeSet(String),
+    SpecificItem(String),
+}
+
+impl RelicSearchQuery {
+    pub fn parse(input: &str) -> Self {
+        if let Some(set_name) = parse_prime_set_query(input) {
+            Self::PrimeSet(set_name)
+        } else {
+            Self::SpecificItem(input.to_string())
+        }
+    }
+}
+
+async fn handle_single_item_query(
+    ctx: Context<'_>,
+    relics: &RelicResponse,
+    item: &str,
+) -> Result<(), Error> {
+    let search_term = normalize_text(item);
+    let mut found_relics = collect_matching_relics(relics, &search_term);
+
+    if found_relics.is_empty() {
+        ctx.say(format!("No relics found containing {}\n\nMake sure to include 'Prime' in your search (e.g., 'Ash Prime Systems')", item))
+            .await?;
+        return Ok(());
+    }
+
+    sort_relics(&mut found_relics);
+    let grouped_relics = group_relics(found_relics);
+    let embed = create_relic_embed(item, &grouped_relics);
+
+    ctx.send(poise::CreateReply::default().embed(embed)).await?;
+    Ok(())
+}
+
 /// Find which relics contain a specific prime item
 #[poise::command(
     slash_command,
@@ -409,26 +447,12 @@ pub async fn lookup(
         }
     };
 
-    if let Some(set_name) = parse_prime_set_query(&item) {
-        handle_set_query(ctx, &relics, &set_name).await?;
-        return Ok(());
+    match RelicSearchQuery::parse(&item) {
+        RelicSearchQuery::PrimeSet(set_name) => handle_set_query(ctx, &relics, &set_name).await,
+        RelicSearchQuery::SpecificItem(item_name) => {
+            handle_single_item_query(ctx, &relics, &item_name).await
+        }
     }
-
-    let search_term = normalize_text(&item);
-    let mut found_relics = collect_matching_relics(&relics, &search_term);
-
-    if found_relics.is_empty() {
-        ctx.say(format!("No relics found containing {}\n\nMake sure to include 'Prime' in your search (e.g., 'Ash Prime Systems')", item))
-            .await?;
-        return Ok(());
-    }
-
-    sort_relics(&mut found_relics);
-    let grouped_relics = group_relics(found_relics);
-    let embed = create_relic_embed(&item, &grouped_relics);
-
-    ctx.send(poise::CreateReply::default().embed(embed)).await?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -552,5 +576,17 @@ mod tests {
         assert_eq!(grouped.len(), 1);
         assert_eq!(grouped[0].0, "Lith A1");
         assert_eq!(grouped[0].1.len(), 2);
+    }
+
+    #[test]
+    fn test_relic_search_query_parse() {
+        assert_eq!(
+            RelicSearchQuery::parse("Ash Prime Set"),
+            RelicSearchQuery::PrimeSet("Ash Prime".to_string())
+        );
+        assert_eq!(
+            RelicSearchQuery::parse("Ash Prime Systems"),
+            RelicSearchQuery::SpecificItem("Ash Prime Systems".to_string())
+        );
     }
 }
