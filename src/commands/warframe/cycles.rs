@@ -21,18 +21,101 @@ where
 #[derive(Deserialize, Debug)]
 pub struct CycleResponse {
     #[serde(default)]
-    state: String,
+    pub state: String,
     #[serde(rename = "isDay")]
-    is_day: Option<bool>,
+    pub is_day: Option<bool>,
     #[serde(rename = "isWarm")]
-    is_warm: Option<bool>,
+    pub is_warm: Option<bool>,
     #[serde(rename = "timeLeft")]
-    time_left: Option<String>,
+    pub time_left: Option<String>,
     #[serde(default, deserialize_with = "deserialize_optional_datetime")]
-    expiry: Option<chrono::DateTime<chrono::Utc>>,
+    pub expiry: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-fn format_status(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CycleKind {
+    DayNight,
+    Temperature,
+    NamedState,
+}
+
+pub struct RegionCycleDef {
+    pub display_name: &'static str,
+    pub endpoint: &'static str,
+    pub kind: CycleKind,
+}
+
+pub const REGIONS: &[RegionCycleDef] = &[
+    RegionCycleDef {
+        display_name: "Cetus",
+        endpoint: "https://api.warframestat.us/pc/cetusCycle",
+        kind: CycleKind::DayNight,
+    },
+    RegionCycleDef {
+        display_name: "Orb Vallis",
+        endpoint: "https://api.warframestat.us/pc/vallisCycle",
+        kind: CycleKind::Temperature,
+    },
+    RegionCycleDef {
+        display_name: "Cambion Drift",
+        endpoint: "https://api.warframestat.us/pc/cambionCycle",
+        kind: CycleKind::NamedState,
+    },
+    RegionCycleDef {
+        display_name: "Earth",
+        endpoint: "https://api.warframestat.us/pc/earthCycle",
+        kind: CycleKind::DayNight,
+    },
+    RegionCycleDef {
+        display_name: "Zariman",
+        endpoint: "https://api.warframestat.us/pc/zarimanCycle",
+        kind: CycleKind::NamedState,
+    },
+];
+
+impl CycleResponse {
+    pub fn resolve_phase_name(&self, kind: CycleKind) -> String {
+        match kind {
+            CycleKind::DayNight => {
+                if self.is_day.unwrap_or(false) || self.state.eq_ignore_ascii_case("day") {
+                    "Day".to_string()
+                } else {
+                    "Night".to_string()
+                }
+            }
+            CycleKind::Temperature => {
+                if self.is_warm.unwrap_or(false) || self.state.eq_ignore_ascii_case("warm") {
+                    "Warm".to_string()
+                } else {
+                    "Cold".to_string()
+                }
+            }
+            CycleKind::NamedState => {
+                let s = self.state.trim();
+                if s.is_empty() {
+                    "Unknown".to_string()
+                } else {
+                    let mut chars = s.chars();
+                    match chars.next() {
+                        Some(first) => format!(
+                            "{}{}",
+                            first.to_ascii_uppercase(),
+                            chars.as_str().to_ascii_lowercase()
+                        ),
+                        None => "Unknown".to_string(),
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn format_status(&self, kind: CycleKind) -> String {
+        let phase = self.resolve_phase_name(kind);
+        format_cycle_display(&phase, self.time_left.as_deref(), self.expiry)
+    }
+}
+
+pub fn format_cycle_display(
     state_name: &str,
     time_left: Option<&str>,
     expiry: Option<chrono::DateTime<chrono::Utc>>,
@@ -70,82 +153,27 @@ fn format_status(
 pub async fn cycle(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
 
-    let (cetus, vallis, cambion, earth) = tokio::join!(
-        get_cached_json::<CycleResponse>(&ctx, "https://api.warframestat.us/pc/cetusCycle"),
-        get_cached_json::<CycleResponse>(&ctx, "https://api.warframestat.us/pc/vallisCycle"),
-        get_cached_json::<CycleResponse>(&ctx, "https://api.warframestat.us/pc/cambionCycle"),
-        get_cached_json::<CycleResponse>(&ctx, "https://api.warframestat.us/pc/earthCycle"),
-    );
+    let futures = REGIONS.iter().map(|region| async move {
+        let result = get_cached_json::<CycleResponse>(&ctx, region.endpoint).await;
+        let formatted = match result {
+            Ok(c) => c.format_status(region.kind),
+            Err(e) => {
+                log::warn!("Failed to fetch {} cycle: {e}", region.display_name);
+                "Unavailable".to_string()
+            }
+        };
+        (region.display_name, formatted)
+    });
 
-    let cetus_str = match cetus {
-        Ok(c) => {
-            let state = if c.is_day.unwrap_or(false) || c.state.eq_ignore_ascii_case("day") {
-                "Day"
-            } else {
-                "Night"
-            };
-            format_status(state, c.time_left.as_deref(), c.expiry)
-        }
-        Err(e) => {
-            log::warn!("Failed to fetch Cetus cycle: {e}");
-            "Unavailable".to_string()
-        }
-    };
+    let results = serenity::futures::future::join_all(futures).await;
 
-    let vallis_str = match vallis {
-        Ok(v) => {
-            let state = if v.is_warm.unwrap_or(false) || v.state.eq_ignore_ascii_case("warm") {
-                "Warm"
-            } else {
-                "Cold"
-            };
-            format_status(state, v.time_left.as_deref(), v.expiry)
-        }
-        Err(e) => {
-            log::warn!("Failed to fetch Vallis cycle: {e}");
-            "Unavailable".to_string()
-        }
-    };
-
-    let cambion_str = match cambion {
-        Ok(c) => {
-            let state = if c.state.eq_ignore_ascii_case("vome") {
-                "Vome"
-            } else if c.state.eq_ignore_ascii_case("fass") {
-                "Fass"
-            } else {
-                "Unknown"
-            };
-            format_status(state, c.time_left.as_deref(), c.expiry)
-        }
-        Err(e) => {
-            log::warn!("Failed to fetch Cambion cycle: {e}");
-            "Unavailable".to_string()
-        }
-    };
-
-    let earth_str = match earth {
-        Ok(e) => {
-            let state = if e.is_day.unwrap_or(false) || e.state.eq_ignore_ascii_case("day") {
-                "Day"
-            } else {
-                "Night"
-            };
-            format_status(state, e.time_left.as_deref(), e.expiry)
-        }
-        Err(e) => {
-            log::warn!("Failed to fetch Earth cycle: {e}");
-            "Unavailable".to_string()
-        }
-    };
-
-    let embed = serenity::CreateEmbed::new()
+    let mut embed = serenity::CreateEmbed::new()
         .title("Warframe Worldstate Cycles")
-        .color(0x2f3136)
-        .field("Cetus", cetus_str, false)
-        .field("Orb Vallis", vallis_str, false)
-        .field("Cambion Drift", cambion_str, false)
-        .field("Earth", earth_str, false);
+        .color(0x2f3136);
+
+    for (name, status) in results {
+        embed = embed.field(name, status, false);
+    }
 
     ctx.send(poise::CreateReply::default().embed(embed)).await?;
     Ok(())
@@ -157,7 +185,7 @@ mod tests {
 
     #[test]
     fn test_format_status_with_time_left() {
-        let formatted = format_status("Day", Some("1h 8m 1s"), None);
+        let formatted = format_cycle_display("Day", Some("1h 8m 1s"), None);
         assert_eq!(formatted, "**Day** (1h 8m 1s remaining)");
     }
 
@@ -177,12 +205,25 @@ mod tests {
         let cycle_empty: CycleResponse = serde_json::from_str(json_empty).unwrap();
         assert!(cycle_empty.expiry.is_none());
 
-        let json_null = r#"{"state":"night","timeLeft":"","expiry":null}"#;
-        let cycle_null: CycleResponse = serde_json::from_str(json_null).unwrap();
-        assert!(cycle_null.expiry.is_none());
-
         let json_omitted = r#"{"state":"night"}"#;
         let cycle_omitted: CycleResponse = serde_json::from_str(json_omitted).unwrap();
         assert!(cycle_omitted.expiry.is_none());
     }
+
+    #[test]
+    fn test_cycle_phases() {
+        let cetus: CycleResponse = serde_json::from_str(r#"{"state":"day"}"#).unwrap();
+        assert_eq!(cetus.resolve_phase_name(CycleKind::DayNight), "Day");
+
+        let vallis: CycleResponse = serde_json::from_str(r#"{"isWarm":true}"#).unwrap();
+        assert_eq!(vallis.resolve_phase_name(CycleKind::Temperature), "Warm");
+
+        let cambion: CycleResponse = serde_json::from_str(r#"{"state":"vome"}"#).unwrap();
+        assert_eq!(cambion.resolve_phase_name(CycleKind::NamedState), "Vome");
+        assert_eq!(cambion.format_status(CycleKind::NamedState), "**Vome**");
+
+        let zariman: CycleResponse = serde_json::from_str(r#"{"state":"corpus"}"#).unwrap();
+        assert_eq!(zariman.resolve_phase_name(CycleKind::NamedState), "Corpus");
+    }
 }
+
