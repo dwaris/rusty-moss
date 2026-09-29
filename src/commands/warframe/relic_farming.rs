@@ -8,8 +8,19 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-type RotationDrop = (String, String, f64);
-type MissionDrops = (String, Vec<RotationDrop>);
+#[derive(Debug, Clone)]
+pub struct RotationDrop {
+    pub rotation: String,
+    pub rarity: String,
+    pub chance: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct MissionDrops {
+    pub mission_label: String,
+    pub drops: Vec<RotationDrop>,
+}
+
 const MISSION_PAGE_SIZE: usize = 10;
 
 const EFFICIENT_GAME_MODES: &[&str] = &["Capture", "Disruption", "Defense"];
@@ -221,21 +232,28 @@ fn group_and_sort_missions(found_drops: Vec<FoundDrop>) -> Vec<MissionDrops> {
 
     for drop in found_drops {
         let mission_label = format!("{} ({})", drop.mission_path, drop.game_mode);
-        mission_map.entry(mission_label).or_default().push((
-            drop.rotation,
-            drop.rarity,
-            drop.chance,
-        ));
+        mission_map.entry(mission_label).or_default().push(RotationDrop {
+            rotation: drop.rotation,
+            rarity: drop.rarity,
+            chance: drop.chance,
+        });
     }
 
     for drops in mission_map.values_mut() {
-        drops.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(Ordering::Equal));
+        drops.sort_by(|a, b| b.chance.partial_cmp(&a.chance).unwrap_or(Ordering::Equal));
     }
 
-    let mut missions: Vec<MissionDrops> = mission_map.into_iter().collect();
+    let mut missions: Vec<MissionDrops> = mission_map
+        .into_iter()
+        .map(|(mission_label, drops)| MissionDrops {
+            mission_label,
+            drops,
+        })
+        .collect();
+
     missions.sort_by(|a, b| {
-        let best_a = a.1.iter().map(|x| x.2).fold(0.0, f64::max);
-        let best_b = b.1.iter().map(|x| x.2).fold(0.0, f64::max);
+        let best_a = a.drops.iter().map(|x| x.chance).fold(0.0, f64::max);
+        let best_b = b.drops.iter().map(|x| x.chance).fold(0.0, f64::max);
         best_b.partial_cmp(&best_a).unwrap_or(Ordering::Equal)
     });
 
@@ -265,12 +283,12 @@ fn create_page_embed(
         )));
 
     let mut description = String::new();
-    for (mission, rotations) in missions {
-        description.push_str(&format!("**{}**\n", mission));
-        for (rotation, rarity, chance) in rotations {
+    for mission in missions {
+        description.push_str(&format!("**{}**\n", mission.mission_label));
+        for drop in &mission.drops {
             description.push_str(&format!(
                 "└ Rotation {} - {}: **{:.2}%**\n",
-                rotation, rarity, chance
+                drop.rotation, drop.rarity, drop.chance
             ));
         }
         description.push('\n');
@@ -522,4 +540,43 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].mission_path, "Earth/E Prime");
     }
+
+    #[test]
+    fn test_group_and_sort_missions() {
+        let drops = vec![
+            FoundDrop {
+                mission_path: "Earth/E Prime".to_string(),
+                game_mode: "Capture".to_string(),
+                rotation: "A".to_string(),
+                rarity: "Common".to_string(),
+                chance: 5.0,
+            },
+            FoundDrop {
+                mission_path: "Mars/O Olympus".to_string(),
+                game_mode: "Disruption".to_string(),
+                rotation: "B".to_string(),
+                rarity: "Uncommon".to_string(),
+                chance: 14.0,
+            },
+            FoundDrop {
+                mission_path: "Earth/E Prime".to_string(),
+                game_mode: "Capture".to_string(),
+                rotation: "B".to_string(),
+                rarity: "Uncommon".to_string(),
+                chance: 10.0,
+            },
+        ];
+
+        let grouped = group_and_sort_missions(drops);
+        assert_eq!(grouped.len(), 2);
+        // Mars should be first because its best chance is 14.0 > 10.0
+        assert_eq!(grouped[0].mission_label, "Mars/O Olympus (Disruption)");
+        assert_eq!(grouped[0].drops[0].chance, 14.0);
+
+        // Earth should have its drops sorted descending (10.0 before 5.0)
+        assert_eq!(grouped[1].mission_label, "Earth/E Prime (Capture)");
+        assert_eq!(grouped[1].drops[0].chance, 10.0);
+        assert_eq!(grouped[1].drops[1].chance, 5.0);
+    }
 }
+

@@ -30,6 +30,30 @@ impl std::fmt::Display for RelicState {
     }
 }
 
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RelicTier {
+    Lith,
+    Meso,
+    Neo,
+    Axi,
+    Requiem,
+    #[serde(other)]
+    Unknown,
+}
+
+impl std::fmt::Display for RelicTier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RelicTier::Lith => write!(f, "Lith"),
+            RelicTier::Meso => write!(f, "Meso"),
+            RelicTier::Neo => write!(f, "Neo"),
+            RelicTier::Axi => write!(f, "Axi"),
+            RelicTier::Requiem => write!(f, "Requiem"),
+            RelicTier::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
 const RELIC_STATES: [RelicState; 4] = [
     RelicState::Intact,
     RelicState::Exceptional,
@@ -46,7 +70,7 @@ pub struct RelicResponse {
 pub struct Relic {
     #[serde(rename = "_id")]
     pub _id: String,
-    pub tier: String,
+    pub tier: RelicTier,
     #[serde(rename = "relicName", alias = "name", default)]
     pub relic_name: Option<String>,
     pub state: RelicState,
@@ -162,7 +186,7 @@ async fn relic_item_autocomplete(ctx: Context<'_>, partial: &str) -> Vec<String>
 
 #[derive(Debug)]
 struct FoundRelic {
-    tier: String,
+    tier: RelicTier,
     relic_name: String,
     state: RelicState,
     chance: f64,
@@ -184,7 +208,7 @@ fn collect_matching_relics(relics: &RelicResponse, search_term: &str) -> Vec<Fou
         for reward in &relic.rewards {
             if normalize_text(&reward.item_name).contains(search_term) {
                 found.push(FoundRelic {
-                    tier: relic.tier.clone(),
+                    tier: relic.tier,
                     relic_name: relic_name.clone(),
                     state: relic.state,
                     chance: reward.chance,
@@ -466,16 +490,25 @@ mod tests {
     }
 
     #[test]
+    fn test_tier_order() {
+        assert!(RelicTier::Lith < RelicTier::Meso);
+        assert!(RelicTier::Meso < RelicTier::Neo);
+        assert!(RelicTier::Neo < RelicTier::Axi);
+        assert!(RelicTier::Axi < RelicTier::Requiem);
+        assert!(RelicTier::Requiem < RelicTier::Unknown);
+    }
+
+    #[test]
     fn test_format_state_chances_orders_by_known_state_priority() {
         let entries = vec![
             FoundRelic {
-                tier: "Lith".to_string(),
+                tier: RelicTier::Lith,
                 relic_name: "Lith A1".to_string(),
                 state: RelicState::Radiant,
                 chance: 10.0,
             },
             FoundRelic {
-                tier: "Lith".to_string(),
+                tier: RelicTier::Lith,
                 relic_name: "Lith A1".to_string(),
                 state: RelicState::Intact,
                 chance: 2.0,
@@ -494,7 +527,7 @@ mod tests {
             relics: vec![
                 Relic {
                     _id: "1".to_string(),
-                    tier: "Lith".to_string(),
+                    tier: RelicTier::Lith,
                     relic_name: Some("A1".to_string()),
                     state: RelicState::Intact,
                     rewards: vec![RelicReward {
@@ -504,7 +537,7 @@ mod tests {
                 },
                 Relic {
                     _id: "2".to_string(),
-                    tier: "Lith".to_string(),
+                    tier: RelicTier::Lith,
                     relic_name: Some("A1".to_string()),
                     state: RelicState::Radiant,
                     rewards: vec![RelicReward {
