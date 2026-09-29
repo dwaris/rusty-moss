@@ -436,10 +436,10 @@ mod tests {
 
         {
             let mut active = active_animations.write().await;
-            if let Some(current_tx) = active.get(&user_id) {
-                if !*rx.borrow() || current_tx.is_closed() {
-                    active.remove(&user_id);
-                }
+            if let Some(current_tx) = active.get(&user_id)
+                && (!*rx.borrow() || current_tx.is_closed())
+            {
+                active.remove(&user_id);
             }
         }
 
