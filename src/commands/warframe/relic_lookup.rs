@@ -7,9 +7,7 @@ use std::collections::HashSet;
 
 use std::sync::Arc;
 
-use super::types::{
-    Relic, RelicResponse, RelicReward, RelicSearchQuery, RelicState, RelicTier, RELIC_STATES,
-};
+use super::types::{RelicResponse, RelicSearchQuery, RelicState, RelicTier, RELIC_STATES};
 
 type RelicEntry = (String, Vec<FoundRelic>);
 
@@ -20,34 +18,6 @@ fn extract_prime_set_name(item_name: &str) -> Option<String> {
         .position(|token| token.eq_ignore_ascii_case("prime"))?;
 
     if prime_index == 0 {
-        return None;
-    }
-
-    Some(tokens[..=prime_index].join(" "))
-}
-
-fn parse_prime_set_query(input: &str) -> Option<String> {
-    let mut tokens: Vec<&str> = input.split_whitespace().collect();
-    if tokens.is_empty() {
-        return None;
-    }
-
-    if tokens
-        .last()
-        .map(|token| token.eq_ignore_ascii_case("set"))
-        .unwrap_or(false)
-    {
-        tokens.pop();
-    }
-
-    if tokens.is_empty() {
-        return None;
-    }
-
-    let prime_index = tokens
-        .iter()
-        .position(|token| token.eq_ignore_ascii_case("prime"))?;
-    if prime_index == 0 || prime_index != tokens.len() - 1 {
         return None;
     }
 
@@ -369,6 +339,7 @@ pub async fn lookup(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::types::{parse_prime_set_query, Relic, RelicReward};
 
     #[test]
     fn test_extract_prime_set_name() {
