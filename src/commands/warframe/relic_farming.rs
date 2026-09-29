@@ -2,58 +2,18 @@ use super::api::get_cached_json;
 use super::normalization::{normalize_whitespace, starts_with_ignore_case};
 use crate::{Context, Error};
 use poise::serenity_prelude as serenity;
-use serde::Deserialize;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone)]
-pub struct RotationDrop {
-    pub rotation: String,
-    pub rarity: String,
-    pub chance: f64,
-}
-
-#[derive(Debug, Clone)]
-pub struct MissionDrops {
-    pub mission_label: String,
-    pub drops: Vec<RotationDrop>,
-}
+use super::types::{
+    ApiResponse, MissionData, MissionDrops, MissionReward, MissionRewards, RelicTier, RotationDrop,
+};
 
 const MISSION_PAGE_SIZE: usize = 10;
 
 const EFFICIENT_GAME_MODES: &[&str] = &["Capture", "Disruption", "Defense"];
-
-#[derive(Deserialize, Debug)]
-pub struct ApiResponse {
-    #[serde(rename = "missionRewards")]
-    pub mission_rewards: HashMap<String, HashMap<String, MissionData>>,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct MissionData {
-    #[serde(rename = "gameMode")]
-    pub game_mode: String,
-    #[serde(rename = "isEvent")]
-    pub is_event: Option<bool>,
-    pub rewards: MissionRewards,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(untagged)]
-pub enum MissionRewards {
-    Rotations(HashMap<String, Vec<MissionReward>>),
-    List(Vec<MissionReward>),
-}
-
-#[derive(Deserialize, Debug)]
-pub struct MissionReward {
-    #[serde(rename = "itemName")]
-    pub item_name: String,
-    pub rarity: String,
-    pub chance: f64,
-}
 
 #[derive(Debug)]
 struct FoundDrop {
@@ -67,21 +27,14 @@ struct FoundDrop {
 fn normalize_relic_name(input: &str) -> Option<String> {
     let parts: Vec<&str> = input.split_whitespace().collect();
 
-    let (tier, code) = match parts.as_slice() {
+    let (tier_str, code) = match parts.as_slice() {
         [tier, code] => (*tier, *code),
         [tier, code, suffix] if suffix.eq_ignore_ascii_case("relic") => (*tier, *code),
         _ => return None,
     };
 
-    let mut tier_chars = tier.chars();
-    let first = tier_chars.next()?;
-    let normalized_tier = format!(
-        "{}{}",
-        first.to_ascii_uppercase(),
-        tier_chars.as_str().to_ascii_lowercase()
-    );
-
-    Some(format!("{} {}", normalized_tier, code.to_ascii_uppercase()))
+    let tier = RelicTier::parse(tier_str)?;
+    Some(format!("{} {}", tier, code.to_ascii_uppercase()))
 }
 
 fn relic_name_from_item(item_name: &str) -> Option<String> {

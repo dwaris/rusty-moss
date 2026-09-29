@@ -2,87 +2,14 @@ use super::api::get_cached_json;
 use super::normalization::{normalize_text, normalize_whitespace};
 use crate::{Context, Error};
 use poise::serenity_prelude as serenity;
-use serde::Deserialize;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 
 use std::sync::Arc;
 
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum RelicState {
-    Intact,
-    Exceptional,
-    Flawless,
-    Radiant,
-    #[serde(other)]
-    Unknown,
-}
-
-impl std::fmt::Display for RelicState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RelicState::Intact => write!(f, "Intact"),
-            RelicState::Exceptional => write!(f, "Exceptional"),
-            RelicState::Flawless => write!(f, "Flawless"),
-            RelicState::Radiant => write!(f, "Radiant"),
-            RelicState::Unknown => write!(f, "Unknown"),
-        }
-    }
-}
-
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum RelicTier {
-    Lith,
-    Meso,
-    Neo,
-    Axi,
-    Requiem,
-    #[serde(other)]
-    Unknown,
-}
-
-impl std::fmt::Display for RelicTier {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RelicTier::Lith => write!(f, "Lith"),
-            RelicTier::Meso => write!(f, "Meso"),
-            RelicTier::Neo => write!(f, "Neo"),
-            RelicTier::Axi => write!(f, "Axi"),
-            RelicTier::Requiem => write!(f, "Requiem"),
-            RelicTier::Unknown => write!(f, "Unknown"),
-        }
-    }
-}
-
-const RELIC_STATES: [RelicState; 4] = [
-    RelicState::Intact,
-    RelicState::Exceptional,
-    RelicState::Flawless,
-    RelicState::Radiant,
-];
-
-#[derive(Deserialize, Debug)]
-pub struct RelicResponse {
-    pub relics: Vec<Relic>,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct Relic {
-    #[serde(rename = "_id")]
-    pub _id: String,
-    pub tier: RelicTier,
-    #[serde(rename = "relicName", alias = "name", default)]
-    pub relic_name: Option<String>,
-    pub state: RelicState,
-    pub rewards: Vec<RelicReward>,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct RelicReward {
-    #[serde(rename = "itemName")]
-    pub item_name: String,
-    pub chance: f64,
-}
+use super::types::{
+    Relic, RelicResponse, RelicReward, RelicSearchQuery, RelicState, RelicTier, RELIC_STATES,
+};
 
 type RelicEntry = (String, Vec<FoundRelic>);
 
@@ -382,22 +309,6 @@ async fn handle_set_query(
 
     let embeds = create_set_embeds(set_name, &part_groups);
     send_embeds(ctx, embeds).await
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RelicSearchQuery {
-    PrimeSet(String),
-    SpecificItem(String),
-}
-
-impl RelicSearchQuery {
-    pub fn parse(input: &str) -> Self {
-        if let Some(set_name) = parse_prime_set_query(input) {
-            Self::PrimeSet(set_name)
-        } else {
-            Self::SpecificItem(input.to_string())
-        }
-    }
 }
 
 async fn handle_single_item_query(
