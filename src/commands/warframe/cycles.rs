@@ -71,6 +71,11 @@ pub const REGIONS: &[RegionCycleDef] = &[
         endpoint: "https://api.warframestat.us/pc/zarimanCycle",
         kind: CycleKind::NamedState,
     },
+    RegionCycleDef {
+        display_name: "Duviri",
+        endpoint: "https://api.warframestat.us/pc/duviriCycle",
+        kind: CycleKind::NamedState,
+    },
 ];
 
 impl CycleResponse {
