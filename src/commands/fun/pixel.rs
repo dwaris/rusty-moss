@@ -23,21 +23,48 @@ pub enum AnimationType {
     Rain,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PixelCell {
+    pub ch: char,
+    pub style: u8,
+}
+
+impl PixelCell {
+    pub const fn new(ch: char, style: u8) -> Self {
+        Self { ch, style }
+    }
+
+    pub const fn blank() -> Self {
+        Self { ch: ' ', style: 0 }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Particle {
+    x: usize,
+    y: usize,
+    speed: u8,
+}
+
 fn wrap_ansi(content: &str) -> String {
     format!("```ansi\n{}\n```", content)
 }
 
-fn render_styled_buffer(buffer: &[Vec<(char, u8)>], palette: &[&str]) -> String {
+fn render_styled_buffer(buffer: &[Vec<PixelCell>], palette: &[&str]) -> String {
     let mut output = String::new();
     let mut current_style: u8 = 0;
 
     for row in buffer {
-        for (ch, style) in row {
-            if *style != current_style {
-                output.push_str(palette[*style as usize]);
-                current_style = *style;
+        for cell in row {
+            if cell.style != current_style {
+                let code = palette
+                    .get(cell.style as usize)
+                    .copied()
+                    .unwrap_or(STYLE_RESET);
+                output.push_str(code);
+                current_style = cell.style;
             }
-            output.push(*ch);
+            output.push(cell.ch);
         }
 
         if current_style != 0 {
@@ -52,7 +79,7 @@ fn render_styled_buffer(buffer: &[Vec<(char, u8)>], palette: &[&str]) -> String 
 
 // --- SHADER: MATRIX ---
 fn render_matrix(frame: usize, drops: &mut [usize]) -> String {
-    let mut buffer = vec![vec![(' ', 0u8); WIDTH]; HEIGHT];
+    let mut buffer = vec![vec![PixelCell::blank(); WIDTH]; HEIGHT];
 
     for x in 0..WIDTH {
         if x % 2 != 0 {
@@ -65,16 +92,16 @@ fn render_matrix(frame: usize, drops: &mut [usize]) -> String {
         for (y, row) in buffer.iter_mut().enumerate() {
             if y == head {
                 let char_idx = (frame + x + y) % MATRIX_CHARS.len();
-                row[x] = (MATRIX_CHARS[char_idx] as char, 1);
+                row[x] = PixelCell::new(MATRIX_CHARS[char_idx] as char, 1);
             } else if head >= y && head - y < 4 {
                 let tail_dist = head - y;
                 let char_idx = (frame + x + y) % MATRIX_CHARS.len();
                 let c = MATRIX_CHARS[char_idx] as char;
 
                 if tail_dist < 2 {
-                    row[x] = (c, 2);
+                    row[x] = PixelCell::new(c, 2);
                 } else {
-                    row[x] = (c, 3);
+                    row[x] = PixelCell::new(c, 3);
                 }
             }
         }
@@ -113,7 +140,7 @@ fn render_fire(_frame: usize, fire_buffer: &mut [Vec<f64>]) -> String {
         *cell = fuel;
     }
 
-    let mut buffer = vec![vec![(' ', 0u8); WIDTH]; HEIGHT];
+    let mut buffer = vec![vec![PixelCell::blank(); WIDTH]; HEIGHT];
 
     for y in 0..HEIGHT {
         for x in 0..WIDTH {
@@ -129,7 +156,7 @@ fn render_fire(_frame: usize, fire_buffer: &mut [Vec<f64>]) -> String {
             } else {
                 (' ', 0)
             };
-            buffer[y][x] = (c, style);
+            buffer[y][x] = PixelCell::new(c, style);
         }
     }
 
@@ -217,44 +244,42 @@ fn render_dvd(frame: usize, offset_x: usize, offset_y: usize) -> String {
 }
 
 // --- SHADER: STARFIELD (SIMPLE) ---
-fn render_starfield(_frame: usize, stars: &mut [(usize, usize, u8)]) -> String {
-    let mut buffer = vec![vec![(' ', 0u8); WIDTH]; HEIGHT];
+fn render_starfield(_frame: usize, stars: &mut [Particle]) -> String {
+    let mut buffer = vec![vec![PixelCell::blank(); WIDTH]; HEIGHT];
 
     for star in stars.iter_mut() {
-        let (x, y, speed) = star;
-        let step = *speed as usize;
+        let step = star.speed as usize;
 
-        if *x < step {
-            *x = WIDTH - 1;
-            *y = rand::thread_rng().gen_range(0..HEIGHT);
+        if star.x < step {
+            star.x = WIDTH - 1;
+            star.y = rand::thread_rng().gen_range(0..HEIGHT);
         } else {
-            *x -= step;
+            star.x -= step;
         }
 
-        let (c, style) = match *speed {
+        let (c, style) = match star.speed {
             2 => ('*', 1),
             _ => ('.', 2),
         };
-        buffer[*y][*x] = (c, style);
+        buffer[star.y][star.x] = PixelCell::new(c, style);
     }
 
     render_styled_buffer(&buffer, &[STYLE_RESET, "\x1b[1;37m", "\x1b[0;36m"])
 }
 
 // --- SHADER: RAIN (SIMPLE) ---
-fn render_rain(_frame: usize, drops: &mut [(usize, usize, u8)]) -> String {
-    let mut buffer = vec![vec![(' ', 0u8); WIDTH]; HEIGHT];
+fn render_rain(_frame: usize, drops: &mut [Particle]) -> String {
+    let mut buffer = vec![vec![PixelCell::blank(); WIDTH]; HEIGHT];
 
     for drop in drops.iter_mut() {
-        let (x, y, speed) = drop;
-        *y = (*y + (*speed as usize)) % (HEIGHT + 2);
+        drop.y = (drop.y + (drop.speed as usize)) % (HEIGHT + 2);
 
-        if *y < HEIGHT {
-            let (c, style) = match *speed {
+        if drop.y < HEIGHT {
+            let (c, style) = match drop.speed {
                 2 => ('|', 1),
                 _ => ('.', 2),
             };
-            buffer[*y][*x] = (c, style);
+            buffer[drop.y][drop.x] = PixelCell::new(c, style);
         }
     }
 
@@ -306,23 +331,19 @@ pub async fn pixel(
         let offset_x = rng.gen_range(0..15);
         let offset_y = rng.gen_range(0..5);
 
-        let stars: Vec<(usize, usize, u8)> = (0..16)
-            .map(|_| {
-                (
-                    rng.gen_range(0..WIDTH),
-                    rng.gen_range(0..HEIGHT),
-                    rng.gen_range(1..=2),
-                )
+        let stars: Vec<Particle> = (0..16)
+            .map(|_| Particle {
+                x: rng.gen_range(0..WIDTH),
+                y: rng.gen_range(0..HEIGHT),
+                speed: rng.gen_range(1..=2),
             })
             .collect();
 
-        let rain_drops: Vec<(usize, usize, u8)> = (0..16)
-            .map(|_| {
-                (
-                    rng.gen_range(0..WIDTH),
-                    rng.gen_range(0..HEIGHT),
-                    rng.gen_range(1..=2),
-                )
+        let rain_drops: Vec<Particle> = (0..16)
+            .map(|_| Particle {
+                x: rng.gen_range(0..WIDTH),
+                y: rng.gen_range(0..HEIGHT),
+                speed: rng.gen_range(1..=2),
             })
             .collect();
 
@@ -445,5 +466,17 @@ mod tests {
 
         assert_eq!(active_animations.read().await.len(), 0);
         assert!(!active_animations.read().await.contains_key(&user_id));
+    }
+
+    #[test]
+    fn test_render_styled_buffer_handles_out_of_bounds_style() {
+        let buffer = vec![vec![
+            PixelCell::new('A', 1),
+            PixelCell::new('B', 99), // out of bounds palette index
+        ]];
+        let palette = &[STYLE_RESET, "\x1b[1;31m"];
+        let rendered = render_styled_buffer(&buffer, palette);
+        assert!(rendered.contains('A'));
+        assert!(rendered.contains('B'));
     }
 }
