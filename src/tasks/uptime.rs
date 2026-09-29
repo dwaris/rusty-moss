@@ -3,9 +3,23 @@ use serde::Deserialize;
 use std::env;
 use std::time::Duration;
 
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ServiceStatus {
+    Up,
+    #[serde(other)]
+    Down,
+}
+
+impl ServiceStatus {
+    pub fn is_up(&self) -> bool {
+        matches!(self, ServiceStatus::Up)
+    }
+}
+
 #[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct MonitorStatus {
-    pub status: String,
+    pub status: ServiceStatus,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -19,9 +33,9 @@ impl UpptimeResponse {
     pub fn is_up(&self) -> bool {
         match self {
             UpptimeResponse::List(monitors) => {
-                !monitors.is_empty() && monitors.iter().all(|m| m.status == "up")
+                !monitors.is_empty() && monitors.iter().all(|m| m.status.is_up())
             }
-            UpptimeResponse::Single(monitor) => monitor.status == "up",
+            UpptimeResponse::Single(monitor) => monitor.status.is_up(),
         }
     }
 }
