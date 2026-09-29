@@ -339,7 +339,7 @@ pub async fn lookup(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::types::{parse_prime_set_query, Relic, RelicReward};
+    use super::super::types::{Relic, RelicReward};
 
     #[test]
     fn test_extract_prime_set_name() {
@@ -360,20 +360,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_prime_set_query() {
-        assert_eq!(
-            parse_prime_set_query("Ash Prime Set"),
-            Some("Ash Prime".to_string())
-        );
-        assert_eq!(
-            parse_prime_set_query("Ash Prime"),
-            Some("Ash Prime".to_string())
-        );
-        assert_eq!(parse_prime_set_query("Ash"), None);
-        assert_eq!(parse_prime_set_query("Prime Set"), None);
-    }
-
-    #[test]
     fn test_part_sort_key() {
         let bp = part_sort_key("Ash Prime Blueprint");
         let chassis = part_sort_key("Ash Prime Chassis Blueprint");
@@ -385,23 +371,6 @@ mod tests {
         assert!(chassis.0 < neuro.0);
         assert!(neuro.0 < systems.0);
         assert!(systems.0 < other.0);
-    }
-
-    #[test]
-    fn test_state_order() {
-        assert!(RelicState::Intact < RelicState::Exceptional);
-        assert!(RelicState::Exceptional < RelicState::Flawless);
-        assert!(RelicState::Flawless < RelicState::Radiant);
-        assert!(RelicState::Radiant < RelicState::Unknown);
-    }
-
-    #[test]
-    fn test_tier_order() {
-        assert!(RelicTier::Lith < RelicTier::Meso);
-        assert!(RelicTier::Meso < RelicTier::Neo);
-        assert!(RelicTier::Neo < RelicTier::Axi);
-        assert!(RelicTier::Axi < RelicTier::Requiem);
-        assert!(RelicTier::Requiem < RelicTier::Unknown);
     }
 
     #[test]

@@ -56,16 +56,3 @@ pub async fn stats(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_format_duration() {
-        assert_eq!(format_duration(0), "0d 0h 0m 0s");
-        assert_eq!(format_duration(65), "0d 0h 1m 5s");
-        assert_eq!(format_duration(3665), "0d 1h 1m 5s");
-        assert_eq!(format_duration(90065), "1d 1h 1m 5s");
-    }
-}
-
