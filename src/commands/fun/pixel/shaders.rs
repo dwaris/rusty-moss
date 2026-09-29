@@ -1,27 +1,9 @@
-use crate::{Context, Error};
-use poise::serenity_prelude as serenity;
 use rand::Rng;
-use std::time::Duration;
-use tokio::time::sleep;
 
-const WIDTH: usize = 24;
-const HEIGHT: usize = 7;
-const STYLE_RESET: &str = "\x1b[0m";
-const MATRIX_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$+-*/=%";
-
-#[derive(poise::ChoiceParameter)]
-pub enum AnimationType {
-    #[name = "matrix"]
-    Matrix,
-    #[name = "dvd"]
-    Dvd,
-    #[name = "fire"]
-    Fire,
-    #[name = "starfield"]
-    Starfield,
-    #[name = "rain"]
-    Rain,
-}
+pub const WIDTH: usize = 24;
+pub const HEIGHT: usize = 7;
+pub const STYLE_RESET: &str = "\x1b[0m";
+pub const MATRIX_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789$+-*/=%";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PixelCell {
@@ -40,17 +22,17 @@ impl PixelCell {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Particle {
-    x: usize,
-    y: usize,
-    speed: u8,
+pub struct Particle {
+    pub x: usize,
+    pub y: usize,
+    pub speed: u8,
 }
 
-fn wrap_ansi(content: &str) -> String {
+pub fn wrap_ansi(content: &str) -> String {
     format!("```ansi\n{}\n```", content)
 }
 
-fn render_styled_buffer(buffer: &[Vec<PixelCell>], palette: &[&str]) -> String {
+pub fn render_styled_buffer(buffer: &[Vec<PixelCell>], palette: &[&str]) -> String {
     let mut output = String::new();
     let mut current_style: u8 = 0;
 
@@ -78,7 +60,7 @@ fn render_styled_buffer(buffer: &[Vec<PixelCell>], palette: &[&str]) -> String {
 }
 
 // --- SHADER: MATRIX ---
-fn render_matrix(frame: usize, drops: &mut [usize]) -> String {
+pub fn render_matrix(frame: usize, drops: &mut [usize]) -> String {
     let mut buffer = vec![vec![PixelCell::blank(); WIDTH]; HEIGHT];
 
     for x in 0..WIDTH {
@@ -114,7 +96,7 @@ fn render_matrix(frame: usize, drops: &mut [usize]) -> String {
 }
 
 // --- SHADER: FIRE ---
-fn render_fire(_frame: usize, fire_buffer: &mut [Vec<f64>]) -> String {
+pub fn render_fire(_frame: usize, fire_buffer: &mut [Vec<f64>]) -> String {
     let mut rng = rand::thread_rng();
     for y in 0..HEIGHT - 1 {
         for x in 0..WIDTH {
@@ -173,7 +155,7 @@ fn render_fire(_frame: usize, fire_buffer: &mut [Vec<f64>]) -> String {
 }
 
 // --- SHADER: DVD ---
-fn render_dvd(frame: usize, offset_x: usize, offset_y: usize) -> String {
+pub fn render_dvd(frame: usize, offset_x: usize, offset_y: usize) -> String {
     let speed_x = 2;
     let speed_y = 1;
 
@@ -244,7 +226,7 @@ fn render_dvd(frame: usize, offset_x: usize, offset_y: usize) -> String {
 }
 
 // --- SHADER: STARFIELD (SIMPLE) ---
-fn render_starfield(_frame: usize, stars: &mut [Particle]) -> String {
+pub fn render_starfield(_frame: usize, stars: &mut [Particle]) -> String {
     let mut buffer = vec![vec![PixelCell::blank(); WIDTH]; HEIGHT];
 
     for star in stars.iter_mut() {
@@ -268,7 +250,7 @@ fn render_starfield(_frame: usize, stars: &mut [Particle]) -> String {
 }
 
 // --- SHADER: RAIN (SIMPLE) ---
-fn render_rain(_frame: usize, drops: &mut [Particle]) -> String {
+pub fn render_rain(_frame: usize, drops: &mut [Particle]) -> String {
     let mut buffer = vec![vec![PixelCell::blank(); WIDTH]; HEIGHT];
 
     for drop in drops.iter_mut() {
@@ -286,187 +268,9 @@ fn render_rain(_frame: usize, drops: &mut [Particle]) -> String {
     render_styled_buffer(&buffer, &[STYLE_RESET, "\x1b[1;36m", "\x1b[0;36m"])
 }
 
-/// Stop any ongoing animation you have running
-#[poise::command(slash_command, prefix_command, category = "Fun")]
-pub async fn stop(ctx: Context<'_>) -> Result<(), Error> {
-    let user_id = ctx.author().id;
-    let mut active = ctx.data().active_animations.write().await;
-
-    if let Some(tx) = active.remove(&user_id) {
-        let _ = tx.send(true);
-        ctx.say("Animation stopped.").await?;
-    } else {
-        ctx.say("You don't have any animations running.").await?;
-    }
-
-    Ok(())
-}
-
-/// Run a cool ASCII pixel animation
-#[poise::command(slash_command, prefix_command, user_cooldown = 5, category = "Fun")]
-pub async fn pixel(
-    ctx: Context<'_>,
-    #[description = "The animation effect to play"] effect: AnimationType,
-    #[description = "Run for a long time (max 2 mins)"] endless: Option<bool>,
-) -> Result<(), Error> {
-    let user_id = ctx.author().id;
-    let (tx, rx) = tokio::sync::watch::channel(false);
-
-    {
-        let mut active = ctx.data().active_animations.write().await;
-        if let Some(old_tx) = active.insert(user_id, tx) {
-            let _ = old_tx.send(true);
-        }
-    }
-
-    let (mut drops, mut fire_buffer, offset_x, offset_y, mut stars, mut rain_drops) = {
-        let mut rng = rand::thread_rng();
-
-        let mut drops = vec![0; WIDTH];
-        for drop in &mut drops {
-            *drop = rng.gen_range(0..HEIGHT);
-        }
-
-        let fire_buffer = vec![vec![0.0; WIDTH]; HEIGHT];
-        let offset_x = rng.gen_range(0..15);
-        let offset_y = rng.gen_range(0..5);
-
-        let stars: Vec<Particle> = (0..16)
-            .map(|_| Particle {
-                x: rng.gen_range(0..WIDTH),
-                y: rng.gen_range(0..HEIGHT),
-                speed: rng.gen_range(1..=2),
-            })
-            .collect();
-
-        let rain_drops: Vec<Particle> = (0..16)
-            .map(|_| Particle {
-                x: rng.gen_range(0..WIDTH),
-                y: rng.gen_range(0..HEIGHT),
-                speed: rng.gen_range(1..=2),
-            })
-            .collect();
-
-        (drops, fire_buffer, offset_x, offset_y, stars, rain_drops)
-    };
-
-    let mut frame = 0;
-    let is_endless = endless.unwrap_or(false);
-    let max_frames = if is_endless { 100 } else { 10 };
-
-    let stop_button_id = format!("stop_pixel_{}", user_id);
-    let stop_button = serenity::CreateButton::new(&stop_button_id)
-        .label("Stop Animation")
-        .style(serenity::ButtonStyle::Secondary);
-    let action_row = serenity::CreateActionRow::Buttons(vec![stop_button]);
-
-    let mut message = ctx
-        .say(wrap_ansi("Initializing..."))
-        .await?
-        .into_message()
-        .await?;
-
-    while frame < max_frames {
-        if *rx.borrow() {
-            break;
-        }
-
-        let content = match effect {
-            AnimationType::Matrix => render_matrix(frame, &mut drops),
-            AnimationType::Dvd => render_dvd(frame, offset_x, offset_y),
-            AnimationType::Fire => render_fire(frame, &mut fire_buffer),
-            AnimationType::Starfield => render_starfield(frame, &mut stars),
-            AnimationType::Rain => render_rain(frame, &mut rain_drops),
-        };
-
-        if message
-            .edit(
-                ctx.serenity_context(),
-                serenity::EditMessage::new()
-                    .content(wrap_ansi(&content))
-                    .components(vec![action_row.clone()]),
-            )
-            .await
-            .is_err()
-        {
-            break;
-        }
-
-        frame += 1;
-
-        let collector = message.await_component_interaction(ctx.serenity_context());
-        tokio::select! {
-            _ = sleep(Duration::from_millis(1250)) => {},
-            interaction = collector => {
-                if let Some(press) = interaction
-                    && press.data.custom_id == stop_button_id
-                {
-                    let _ = press.create_response(
-                        ctx.serenity_context(),
-                        serenity::CreateInteractionResponse::Acknowledge,
-                    ).await;
-                    break;
-                }
-            }
-        }
-    }
-
-    {
-        let mut active = ctx.data().active_animations.write().await;
-        if let Some(current_tx) = active.get(&user_id)
-            && (!*rx.borrow() || current_tx.is_closed() || frame >= max_frames)
-        {
-            active.remove(&user_id);
-        }
-    }
-
-    let _ = message
-        .edit(
-            ctx.serenity_context(),
-            serenity::EditMessage::new()
-                .content("Animation finished.")
-                .components(vec![]),
-        )
-        .await;
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
-    use tokio::sync::RwLock;
-
-    #[tokio::test]
-    async fn test_active_animation_registration_and_cleanup() {
-        let active_animations = RwLock::new(HashMap::new());
-        let user_id = serenity::UserId::new(123456789);
-
-        let (tx, rx) = tokio::sync::watch::channel(false);
-
-        {
-            let mut active = active_animations.write().await;
-            if let Some(old_tx) = active.insert(user_id, tx) {
-                let _ = old_tx.send(true);
-            }
-        }
-
-        assert_eq!(active_animations.read().await.len(), 1);
-        assert!(!*rx.borrow());
-
-        {
-            let mut active = active_animations.write().await;
-            if let Some(current_tx) = active.get(&user_id)
-                && (!*rx.borrow() || current_tx.is_closed())
-            {
-                active.remove(&user_id);
-            }
-        }
-
-        assert_eq!(active_animations.read().await.len(), 0);
-        assert!(!active_animations.read().await.contains_key(&user_id));
-    }
 
     #[test]
     fn test_render_styled_buffer_handles_out_of_bounds_style() {
