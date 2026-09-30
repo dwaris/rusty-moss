@@ -47,20 +47,20 @@ fn collect_item_suggestions(relics: &RelicResponse, partial: &str) -> Vec<String
 
     for relic in &relics.relics {
         for reward in &relic.rewards {
-            let cleaned = normalize_whitespace(&reward.item_name);
-            if !cleaned.contains("Prime") {
+            let item_normalized = normalize_text(&reward.item_name);
+            if !item_normalized.contains("prime") {
                 continue;
             }
 
-            let cleaned_lower = cleaned.to_lowercase();
-            if partial_lower.is_empty() || cleaned_lower.contains(&partial_lower) {
+            let cleaned = normalize_whitespace(&reward.item_name);
+            if partial_lower.is_empty() || item_normalized.contains(&partial_lower) {
                 unique.insert(cleaned);
             }
 
             if let Some(set_name) = extract_prime_set_name(&reward.item_name) {
-                let cleaned_set = normalize_whitespace(&set_name);
-                if partial_lower.is_empty() || cleaned_set.to_lowercase().contains(&partial_lower) {
-                    unique.insert(cleaned_set);
+                let set_normalized = normalize_text(&set_name);
+                if partial_lower.is_empty() || set_normalized.contains(&partial_lower) {
+                    unique.insert(normalize_whitespace(&set_name));
                 }
             }
         }
@@ -123,11 +123,10 @@ fn collect_set_parts(relics: &RelicResponse, set_name: &str) -> Vec<String> {
 
     for relic in &relics.relics {
         for reward in &relic.rewards {
-            let cleaned_item = normalize_whitespace(&reward.item_name);
-            let normalized_item = cleaned_item.to_lowercase();
+            let normalized_item = normalize_text(&reward.item_name);
 
             if normalized_item.starts_with(&set_prefix) {
-                unique_parts.insert(cleaned_item);
+                unique_parts.insert(normalize_whitespace(&reward.item_name));
             }
         }
     }
@@ -286,19 +285,15 @@ async fn handle_single_item_query(
     relics: &RelicResponse,
     item: &str,
 ) -> Result<(), Error> {
-    let search_term = normalize_text(item);
-    let mut found_relics = collect_matching_relics(relics, &search_term);
+    let grouped_relics = group_sorted_relics(relics, &normalize_text(item));
 
-    if found_relics.is_empty() {
+    if grouped_relics.is_empty() {
         ctx.say(format!("No relics found containing {}\n\nMake sure to include 'Prime' in your search (e.g., 'Ash Prime Systems')", item))
             .await?;
         return Ok(());
     }
 
-    sort_relics(&mut found_relics);
-    let grouped_relics = group_relics(found_relics);
     let embed = create_relic_embed(item, &grouped_relics);
-
     ctx.send(poise::CreateReply::default().embed(embed)).await?;
     Ok(())
 }
