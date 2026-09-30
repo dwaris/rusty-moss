@@ -32,90 +32,70 @@ pub struct CycleResponse {
     pub expiry: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CycleKind {
-    DayNight,
-    Temperature,
-    NamedState,
-}
-
 pub struct RegionCycleDef {
     pub display_name: &'static str,
     pub endpoint: &'static str,
-    pub kind: CycleKind,
 }
 
 pub const REGIONS: &[RegionCycleDef] = &[
     RegionCycleDef {
         display_name: "Cetus",
         endpoint: "https://api.warframestat.us/pc/cetusCycle",
-        kind: CycleKind::DayNight,
     },
     RegionCycleDef {
         display_name: "Orb Vallis",
         endpoint: "https://api.warframestat.us/pc/vallisCycle",
-        kind: CycleKind::Temperature,
     },
     RegionCycleDef {
         display_name: "Cambion Drift",
         endpoint: "https://api.warframestat.us/pc/cambionCycle",
-        kind: CycleKind::NamedState,
     },
     RegionCycleDef {
         display_name: "Earth",
         endpoint: "https://api.warframestat.us/pc/earthCycle",
-        kind: CycleKind::DayNight,
     },
     RegionCycleDef {
         display_name: "Zariman",
         endpoint: "https://api.warframestat.us/pc/zarimanCycle",
-        kind: CycleKind::NamedState,
     },
     RegionCycleDef {
         display_name: "Duviri",
         endpoint: "https://api.warframestat.us/pc/duviriCycle",
-        kind: CycleKind::NamedState,
     },
 ];
 
 impl CycleResponse {
-    pub fn resolve_phase_name(&self, kind: CycleKind) -> String {
-        match kind {
-            CycleKind::DayNight => {
-                if self.is_day.unwrap_or(false) || self.state.eq_ignore_ascii_case("day") {
-                    "Day".to_string()
-                } else {
-                    "Night".to_string()
-                }
+    pub fn phase_name(&self) -> String {
+        let trimmed = self.state.trim();
+        if !trimmed.is_empty() {
+            let mut chars = trimmed.chars();
+            match chars.next() {
+                Some(first) => format!(
+                    "{}{}",
+                    first.to_ascii_uppercase(),
+                    chars.as_str().to_ascii_lowercase()
+                ),
+                None => "Unknown".to_string(),
             }
-            CycleKind::Temperature => {
-                if self.is_warm.unwrap_or(false) || self.state.eq_ignore_ascii_case("warm") {
-                    "Warm".to_string()
-                } else {
-                    "Cold".to_string()
-                }
+        } else if let Some(is_day) = self.is_day {
+            if is_day {
+                "Day".to_string()
+            } else {
+                "Night".to_string()
             }
-            CycleKind::NamedState => {
-                let s = self.state.trim();
-                if s.is_empty() {
-                    "Unknown".to_string()
-                } else {
-                    let mut chars = s.chars();
-                    match chars.next() {
-                        Some(first) => format!(
-                            "{}{}",
-                            first.to_ascii_uppercase(),
-                            chars.as_str().to_ascii_lowercase()
-                        ),
-                        None => "Unknown".to_string(),
-                    }
-                }
+        } else if let Some(is_warm) = self.is_warm {
+            if is_warm {
+                "Warm".to_string()
+            } else {
+                "Cold".to_string()
             }
+        } else {
+            "Unknown".to_string()
         }
     }
 
-    pub fn format_status(&self, kind: CycleKind) -> String {
-        let phase = self.resolve_phase_name(kind);
+    pub fn format_status(&self) -> String {
+        let phase = self.phase_name();
         format_cycle_display(&phase, self.time_left.as_deref(), self.expiry)
     }
 }
@@ -161,7 +141,7 @@ pub async fn cycle(ctx: Context<'_>) -> Result<(), Error> {
     let futures = REGIONS.iter().map(|region| async move {
         let result = get_cached_json::<CycleResponse>(&ctx, region.endpoint).await;
         let formatted = match result {
-            Ok(c) => c.format_status(region.kind),
+            Ok(c) => c.format_status(),
             Err(e) => {
                 log::warn!("Failed to fetch {} cycle: {e}", region.display_name);
                 "Unavailable".to_string()
@@ -218,17 +198,20 @@ mod tests {
     #[test]
     fn test_cycle_phases() {
         let cetus: CycleResponse = serde_json::from_str(r#"{"state":"day"}"#).unwrap();
-        assert_eq!(cetus.resolve_phase_name(CycleKind::DayNight), "Day");
+        assert_eq!(cetus.phase_name(), "Day");
 
         let vallis: CycleResponse = serde_json::from_str(r#"{"isWarm":true}"#).unwrap();
-        assert_eq!(vallis.resolve_phase_name(CycleKind::Temperature), "Warm");
+        assert_eq!(vallis.phase_name(), "Warm");
 
         let cambion: CycleResponse = serde_json::from_str(r#"{"state":"vome"}"#).unwrap();
-        assert_eq!(cambion.resolve_phase_name(CycleKind::NamedState), "Vome");
-        assert_eq!(cambion.format_status(CycleKind::NamedState), "**Vome**");
+        assert_eq!(cambion.phase_name(), "Vome");
+        assert_eq!(cambion.format_status(), "**Vome**");
 
         let zariman: CycleResponse = serde_json::from_str(r#"{"state":"corpus"}"#).unwrap();
-        assert_eq!(zariman.resolve_phase_name(CycleKind::NamedState), "Corpus");
+        assert_eq!(zariman.phase_name(), "Corpus");
+
+        let duviri: CycleResponse = serde_json::from_str(r#"{"state":"fear"}"#).unwrap();
+        assert_eq!(duviri.phase_name(), "Fear");
     }
 }
 
