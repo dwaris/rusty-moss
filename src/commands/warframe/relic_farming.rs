@@ -8,7 +8,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use super::types::{
-    ApiResponse, MissionData, MissionDrops, MissionReward, MissionRewards, RelicTier, RotationDrop,
+    MissionApiResponse, MissionData, MissionDrops, MissionReward, MissionRewards, RelicTier,
+    RotationDrop,
 };
 
 const MISSION_PAGE_SIZE: usize = 10;
@@ -62,7 +63,7 @@ where
     }
 }
 
-async fn fetch_mission_rewards(ctx: &Context<'_>) -> Result<Arc<ApiResponse>, Error> {
+async fn fetch_mission_rewards(ctx: &Context<'_>) -> Result<Arc<MissionApiResponse>, Error> {
     get_cached_json(
         ctx,
         "https://drops.warframestat.us/data/missionRewards.json",
@@ -70,7 +71,7 @@ async fn fetch_mission_rewards(ctx: &Context<'_>) -> Result<Arc<ApiResponse>, Er
     .await
 }
 
-fn collect_relic_name_suggestions(api_response: &ApiResponse) -> Vec<String> {
+fn collect_relic_name_suggestions(api_response: &MissionApiResponse) -> Vec<String> {
     let mut unique = HashSet::new();
 
     for missions in api_response.mission_rewards.values() {
@@ -143,7 +144,7 @@ fn page_components(current_page: usize, total_pages: usize) -> Vec<serenity::Cre
 }
 
 fn collect_found_drops(
-    api_response: &ApiResponse,
+    api_response: &MissionApiResponse,
     search_term: &str,
     fast_only: bool,
 ) -> Vec<FoundDrop> {
@@ -457,7 +458,7 @@ mod tests {
 
     #[test]
     fn test_collect_found_drops_skips_events() {
-        let api_response = ApiResponse {
+        let api_response = MissionApiResponse {
             mission_rewards: HashMap::from([(
                 "Earth".to_string(),
                 HashMap::from([

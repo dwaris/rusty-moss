@@ -144,8 +144,6 @@ pub struct MissionApiResponse {
     pub mission_rewards: HashMap<String, HashMap<String, MissionData>>,
 }
 
-pub type ApiResponse = MissionApiResponse;
-
 #[derive(Deserialize, Debug)]
 pub struct MissionData {
     #[serde(rename = "gameMode")]
