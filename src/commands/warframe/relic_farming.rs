@@ -38,12 +38,108 @@ fn normalize_relic_name(input: &str) -> Option<String> {
     Some(format!("{} {}", tier, code.to_ascii_uppercase()))
 }
 
-fn relic_name_from_item(item_name: &str) -> Option<String> {
+pub(crate) fn relic_name_from_item(item_name: &str) -> Option<String> {
     let cleaned = normalize_whitespace(item_name);
-    cleaned.strip_suffix(" Relic").map(str::to_string)
+    let without_parentheses = if let Some(idx) = cleaned.find(" Relic (") {
+        &cleaned[..idx]
+    } else {
+        cleaned.strip_suffix(" Relic")?
+    };
+    Some(without_parentheses.to_string())
 }
 
-fn for_each_mission_reward<F>(mission_data: &MissionData, mut callback: F)
+fn relic_tier_and_code(name: &str) -> Option<(&str, &str)> {
+    let mut parts = name.split_whitespace();
+    let tier = parts.next()?;
+    let code = parts.next()?;
+    Some((tier, code))
+}
+
+fn is_subsequence(sub: &str, text: &str) -> bool {
+    let mut text_chars = text.chars();
+    for s in sub.chars() {
+        if !text_chars.any(|c| c.eq_ignore_ascii_case(&s)) {
+            return false;
+        }
+    }
+    true
+}
+
+fn fuzzy_match_relic_score(name: &str, query: &str) -> Option<u32> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return Some(100);
+    }
+
+    let n_lower = name.to_lowercase();
+    if n_lower == q {
+        return Some(0);
+    }
+
+    let (_tier, code) = relic_tier_and_code(name).unwrap_or(("", ""));
+    let code_lower = code.to_lowercase();
+
+    if code_lower == q {
+        return Some(10);
+    }
+
+    if n_lower.starts_with(&q) {
+        return Some(20);
+    }
+
+    if code_lower.starts_with(&q) {
+        return Some(30);
+    }
+
+    if code_lower.contains(&q) {
+        return Some(40);
+    }
+
+    let q_tokens: Vec<&str> = q.split_whitespace().collect();
+    if q_tokens.len() > 1 && q_tokens.iter().all(|tok| n_lower.contains(tok)) {
+        return Some(50);
+    }
+
+    if n_lower.contains(&q) {
+        return Some(60);
+    }
+
+    let q_condensed: String = q.chars().filter(|c| !c.is_whitespace()).collect();
+    let n_condensed: String = n_lower.chars().filter(|c| !c.is_whitespace()).collect();
+    if !q_condensed.is_empty() && is_subsequence(&q_condensed, &n_condensed) {
+        return Some(70);
+    }
+
+    None
+}
+
+pub fn filter_relic_suggestions<'a>(
+    names: impl IntoIterator<Item = &'a String>,
+    query: &str,
+) -> Vec<String> {
+    let query_trimmed = query.trim();
+    if query_trimmed.is_empty() {
+        let mut list: Vec<String> = names.into_iter().cloned().collect();
+        list.sort();
+        list.truncate(25);
+        return list;
+    }
+
+    let mut matches: Vec<(u32, String)> = names
+        .into_iter()
+        .filter_map(|name| {
+            fuzzy_match_relic_score(name, query_trimmed).map(|score| (score, name.clone()))
+        })
+        .collect();
+
+    matches.sort_by(|(score_a, name_a), (score_b, name_b)| {
+        score_a.cmp(score_b).then_with(|| name_a.cmp(name_b))
+    });
+
+    matches.into_iter().map(|(_, name)| name).take(25).collect()
+}
+
+pub(crate) fn for_each_mission_reward<F>(mission_data: &MissionData, mut callback: F)
 where
     F: FnMut(&str, &MissionReward),
 {
@@ -63,7 +159,9 @@ where
     }
 }
 
-async fn fetch_mission_rewards(ctx: &Context<'_>) -> Result<Arc<MissionApiResponse>, Error> {
+pub(crate) async fn fetch_mission_rewards(
+    ctx: &Context<'_>,
+) -> Result<Arc<MissionApiResponse>, Error> {
     get_cached_json(
         ctx,
         "https://drops.warframestat.us/data/missionRewards.json",
@@ -118,12 +216,7 @@ async fn farm_relic_autocomplete(ctx: Context<'_>, partial: &str) -> Vec<String>
         names
     };
 
-    names
-        .iter()
-        .filter(|n| starts_with_ignore_case(n, partial))
-        .take(25)
-        .cloned()
-        .collect()
+    filter_relic_suggestions(names.iter(), partial)
 }
 
 fn page_components(current_page: usize, total_pages: usize) -> Vec<serenity::CreateActionRow> {
@@ -321,7 +414,7 @@ pub async fn farm(
     let requested_page = page.unwrap_or(1).max(1);
 
     let Some(normalized_relic) = normalize_relic_name(relic.as_str()) else {
-        ctx.say("❌ Invalid relic format. Use: 'Lith A1', 'Meso B5', 'Neo Z8', or 'Axi S9'")
+        ctx.say("Invalid relic format. Use: 'Lith A1', 'Meso B5', 'Neo Z8', or 'Axi S9'")
             .await?;
         return Ok(());
     };
@@ -343,12 +436,12 @@ pub async fn farm(
     if found_drops.is_empty() {
         let msg = if fast_only {
             format!(
-                "❌ No efficient missions found that drop **{}**. Try setting `fast_only` to false.",
+                "No efficient missions found that drop **{}**. Try setting `fast_only` to false.",
                 relic_name
             )
         } else {
             format!(
-                "❌ No missions found that drop **{}**\n\nMake sure to use the format: 'Lith A1', 'Meso B5', 'Neo Z8', or 'Axi S9'. If the format is correct, this relic may not be in the current drop table.",
+                "No missions found that drop **{}**\n\nMake sure to use the format: 'Lith A1', 'Meso B5', 'Neo Z8', or 'Axi S9'. If the format is correct, this relic may not be in the current drop table.",
                 relic_name
             )
         };
@@ -531,6 +624,45 @@ mod tests {
         assert_eq!(grouped[1].mission_label, "Earth/E Prime (Capture)");
         assert_eq!(grouped[1].drops[0].chance, 10.0);
         assert_eq!(grouped[1].drops[1].chance, 5.0);
+    }
+
+    #[test]
+    fn test_relic_name_from_item_handles_radiant() {
+        assert_eq!(
+            relic_name_from_item("Axi A21 Relic (Radiant)"),
+            Some("Axi A21".to_string())
+        );
+        assert_eq!(
+            relic_name_from_item("Lith T11 Relic"),
+            Some("Lith T11".to_string())
+        );
+    }
+
+    #[test]
+    fn test_filter_relic_suggestions_fuzzy_and_numeric() {
+        let relics = vec![
+            "Axi A11".to_string(),
+            "Axi A21".to_string(),
+            "Lith T11".to_string(),
+            "Meso B5".to_string(),
+            "Neo V11".to_string(),
+        ];
+
+        // "11" should find all relics with 11 in their code
+        let matches_11 = filter_relic_suggestions(&relics, "11");
+        assert_eq!(matches_11, vec!["Axi A11", "Lith T11", "Neo V11"]);
+
+        // "a11" should prioritize Axi A11
+        let matches_a11 = filter_relic_suggestions(&relics, "a11");
+        assert_eq!(matches_a11[0], "Axi A11");
+
+        // "axi 11" should match Axi A11
+        let matches_axi_11 = filter_relic_suggestions(&relics, "axi 11");
+        assert_eq!(matches_axi_11, vec!["Axi A11"]);
+
+        // "axi" should match all Axi relics
+        let matches_axi = filter_relic_suggestions(&relics, "axi");
+        assert_eq!(matches_axi, vec!["Axi A11", "Axi A21"]);
     }
 }
 

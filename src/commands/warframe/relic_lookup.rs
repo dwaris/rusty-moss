@@ -1,5 +1,7 @@
 use super::api::get_cached_json;
 use super::normalization::{normalize_text, normalize_whitespace};
+use super::relic_farming::fetch_mission_rewards;
+use super::relic_overlap::format_set_overlapping_missions;
 use crate::{Context, Error};
 use poise::serenity_prelude as serenity;
 use std::cmp::Ordering;
@@ -175,6 +177,7 @@ fn create_relic_embed(item: &str, grouped_relics: &[RelicEntry]) -> serenity::Cr
 fn create_set_embeds(
     set_name: &str,
     part_groups: &[(String, Vec<RelicEntry>)],
+    overlap_summary: Option<&str>,
 ) -> Vec<serenity::CreateEmbed> {
     let mut embeds = Vec::new();
     let mut current_embed = serenity::CreateEmbed::new()
@@ -206,6 +209,19 @@ fn create_set_embeds(
         }
 
         current_description.push_str(&part_text);
+    }
+
+    if let Some(overlap_text) = overlap_summary {
+        let section = format!("__**Best Overlapping Farm Spots**__\n{}\n", overlap_text);
+        if current_description.len() + section.len() > 3800 {
+            embeds.push(current_embed.description(current_description));
+            current_embed = serenity::CreateEmbed::new()
+                .title(format!("Best Overlapping Farm Spots for {} set", set_name))
+                .color(0x00AE86);
+            current_description = section;
+        } else {
+            current_description.push_str(&section);
+        }
     }
 
     if !current_description.is_empty() {
@@ -271,12 +287,22 @@ async fn handle_set_query(
     }
 
     let mut part_groups = Vec::new();
+    let mut set_relic_names = HashSet::new();
+
     for part in set_parts {
         let grouped_relics = group_sorted_relics(relics, &normalize_text(&part));
+        for (relic_name, _) in &grouped_relics {
+            set_relic_names.insert(relic_name.clone());
+        }
         part_groups.push((part, grouped_relics));
     }
 
-    let embeds = create_set_embeds(set_name, &part_groups);
+    let mission_api = fetch_mission_rewards(&ctx).await.ok();
+    let overlap_summary = mission_api.as_deref().map(|api| {
+        format_set_overlapping_missions(api, &set_relic_names, 4)
+    });
+
+    let embeds = create_set_embeds(set_name, &part_groups, overlap_summary.as_deref());
     send_embeds(ctx, embeds).await
 }
 
@@ -434,5 +460,32 @@ mod tests {
             RelicSearchQuery::parse("Ash Prime Systems"),
             RelicSearchQuery::SpecificItem("Ash Prime Systems".to_string())
         );
+    }
+
+    #[test]
+    fn test_create_set_embeds_includes_overlap_section() {
+        let part_groups = vec![(
+            "Ash Prime Blueprint".to_string(),
+            vec![(
+                "Lith A1".to_string(),
+                vec![FoundRelic {
+                    tier: RelicTier::Lith,
+                    relic_name: "Lith A1".to_string(),
+                    state: RelicState::Intact,
+                    chance: 2.0,
+                }],
+            )],
+        )];
+
+        let overlap_text = "**Lua/Apollo (Disruption)** — **2 relics covered**\n";
+        let embeds = create_set_embeds("Ash Prime", &part_groups, Some(overlap_text));
+
+        assert_eq!(embeds.len(), 1);
+        let json = serde_json::to_value(&embeds[0]).unwrap();
+        let desc = json["description"].as_str().unwrap_or("");
+        assert!(desc.contains("Ash Prime Blueprint"));
+        assert!(desc.contains("Lith A1"));
+        assert!(desc.contains("Best Overlapping Farm Spots"));
+        assert!(desc.contains("Lua/Apollo (Disruption)"));
     }
 }

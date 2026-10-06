@@ -1,0 +1,2 @@
+- [x] automatische überscheidungen von besten farm spots für relics
+- [x] fuzzy search: input 11 find all relics with 11
