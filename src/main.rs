@@ -82,7 +82,7 @@ fn build_framework_options() -> poise::FrameworkOptions<BotData, Error> {
             })
         },
         skip_checks_for_owners: false,
-        event_handler: |_ctx, event, _framework, _data| {
+        event_handler: |_ctx, event| {
             Box::pin(async move {
                 log::trace!(
                     "Got an event in event handler: {:?}",

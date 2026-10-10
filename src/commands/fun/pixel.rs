@@ -1,6 +1,6 @@
 use crate::{Context, Error};
 use poise::serenity_prelude as serenity;
-use rand::Rng;
+use rand::RngExt;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -115,7 +115,7 @@ fn render_matrix(frame: usize, drops: &mut [usize]) -> String {
 
 // --- ANIMATION: FIRE ---
 fn render_fire(_frame: usize, fire_buffer: &mut [Vec<f64>]) -> String {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     for y in 0..HEIGHT - 1 {
         for x in 0..WIDTH {
             let left = if x > 0 {
@@ -130,13 +130,13 @@ fn render_fire(_frame: usize, fire_buffer: &mut [Vec<f64>]) -> String {
             };
             let mid = fire_buffer[y + 1][x];
 
-            let cooling = rng.gen_range(0.0..0.12);
+            let cooling = rng.random_range(0.0..0.12);
             fire_buffer[y][x] = ((left + right + mid) / 3.0 - cooling).clamp(0.0, 1.0);
         }
     }
 
     for cell in &mut fire_buffer[HEIGHT - 1] {
-        let fuel = rng.gen_range(0.4..1.0);
+        let fuel = rng.random_range(0.4..1.0);
         *cell = fuel;
     }
 
@@ -252,7 +252,7 @@ fn render_starfield(_frame: usize, stars: &mut [Particle]) -> String {
 
         if star.x < step {
             star.x = WIDTH - 1;
-            star.y = rand::thread_rng().gen_range(0..HEIGHT);
+            star.y = rand::random_range(0..HEIGHT);
         } else {
             star.x -= step;
         }
@@ -320,30 +320,30 @@ pub async fn pixel(
     }
 
     let (mut drops, mut fire_buffer, offset_x, offset_y, mut stars, mut rain_drops) = {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         let mut drops = vec![0; WIDTH];
         for drop in &mut drops {
-            *drop = rng.gen_range(0..HEIGHT);
+            *drop = rng.random_range(0..HEIGHT);
         }
 
         let fire_buffer = vec![vec![0.0; WIDTH]; HEIGHT];
-        let offset_x = rng.gen_range(0..15);
-        let offset_y = rng.gen_range(0..5);
+        let offset_x = rng.random_range(0..15);
+        let offset_y = rng.random_range(0..5);
 
         let stars: Vec<Particle> = (0..16)
             .map(|_| Particle {
-                x: rng.gen_range(0..WIDTH),
-                y: rng.gen_range(0..HEIGHT),
-                speed: rng.gen_range(1..=2),
+                x: rng.random_range(0..WIDTH),
+                y: rng.random_range(0..HEIGHT),
+                speed: rng.random_range(1..=2),
             })
             .collect();
 
         let rain_drops: Vec<Particle> = (0..16)
             .map(|_| Particle {
-                x: rng.gen_range(0..WIDTH),
-                y: rng.gen_range(0..HEIGHT),
-                speed: rng.gen_range(1..=2),
+                x: rng.random_range(0..WIDTH),
+                y: rng.random_range(0..HEIGHT),
+                speed: rng.random_range(1..=2),
             })
             .collect();
 

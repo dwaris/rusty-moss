@@ -189,7 +189,7 @@ fn collect_relic_name_suggestions(api_response: &MissionApiResponse) -> Vec<Stri
     suggestions
 }
 
-async fn farm_relic_autocomplete(ctx: Context<'_>, partial: &str) -> Vec<String> {
+async fn farm_relic_autocomplete(ctx: Context<'_>, partial: &str) -> serenity::CreateAutocompleteResponse {
     let cached = {
         let cache = ctx.data().relic_names_cache.read().await;
         if let Some((instant, names)) = &*cache {
@@ -208,7 +208,7 @@ async fn farm_relic_autocomplete(ctx: Context<'_>, partial: &str) -> Vec<String>
     } else {
         let api_response = match fetch_mission_rewards(&ctx).await {
             Ok(response) => response,
-            Err(_) => return Vec::new(),
+            Err(_) => return serenity::CreateAutocompleteResponse::new(),
         };
         let names: Arc<[String]> = collect_relic_name_suggestions(&api_response).into();
         let mut cache = ctx.data().relic_names_cache.write().await;
@@ -216,7 +216,12 @@ async fn farm_relic_autocomplete(ctx: Context<'_>, partial: &str) -> Vec<String>
         names
     };
 
-    filter_relic_suggestions(names.iter(), partial)
+    let choices = filter_relic_suggestions(names.iter(), partial)
+        .into_iter()
+        .map(serenity::AutocompleteChoice::from)
+        .collect();
+
+    serenity::CreateAutocompleteResponse::new().set_choices(choices)
 }
 
 fn page_components(current_page: usize, total_pages: usize) -> Vec<serenity::CreateActionRow> {
@@ -402,7 +407,7 @@ async fn handle_page_interactions(
 pub async fn farm(
     ctx: Context<'_>,
     #[description = "Only show efficient mission types (default true)"] fast_only: Option<bool>,
-    #[description = "Result page number (default 1)"] page: Option<usize>,
+    #[description = "Result page number (default 1)"] page: Option<u32>,
     #[description = "Relic to farm (e.g., 'Lith A1' or 'Axi S9')"]
     #[autocomplete = "farm_relic_autocomplete"]
     #[rest]
@@ -411,7 +416,7 @@ pub async fn farm(
     ctx.defer().await?;
 
     let fast_only = fast_only.unwrap_or(true);
-    let requested_page = page.unwrap_or(1).max(1);
+    let requested_page = (page.unwrap_or(1).max(1)) as usize;
 
     let Some(normalized_relic) = normalize_relic_name(relic.as_str()) else {
         ctx.say("Invalid relic format. Use: 'Lith A1', 'Meso B5', 'Neo Z8', or 'Axi S9'")

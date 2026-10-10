@@ -74,13 +74,18 @@ fn collect_item_suggestions(relics: &RelicResponse, partial: &str) -> Vec<String
     suggestions
 }
 
-async fn relic_item_autocomplete(ctx: Context<'_>, partial: &str) -> Vec<String> {
+async fn relic_item_autocomplete(ctx: Context<'_>, partial: &str) -> serenity::CreateAutocompleteResponse {
     let relics = match fetch_relics(&ctx).await {
         Ok(relics) => relics,
-        Err(_) => return Vec::new(),
+        Err(_) => return serenity::CreateAutocompleteResponse::new(),
     };
 
-    collect_item_suggestions(&relics, partial)
+    let choices = collect_item_suggestions(&relics, partial)
+        .into_iter()
+        .map(serenity::AutocompleteChoice::from)
+        .collect();
+
+    serenity::CreateAutocompleteResponse::new().set_choices(choices)
 }
 
 #[derive(Debug)]
