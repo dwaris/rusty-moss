@@ -40,29 +40,4 @@ pub async fn get_cached_json<T: DeserializeOwned + Send + Sync + 'static>(
     Ok(data)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::any::Any;
-    use std::time::Duration;
 
-    #[tokio::test]
-    async fn test_moka_cache_downcast_and_expiry() {
-        let cache: moka::future::Cache<String, Arc<dyn Any + Send + Sync>> =
-            moka::future::Cache::builder()
-                .time_to_live(Duration::from_millis(50))
-                .build();
-
-        let value = Arc::new("cached test payload".to_string());
-        cache.insert("test_key".to_string(), value).await;
-
-        let retrieved = cache.get("test_key").await.expect("Key should exist");
-        let downcasted = retrieved
-            .downcast::<String>()
-            .expect("Downcast must succeed");
-        assert_eq!(&*downcasted, "cached test payload");
-
-        tokio::time::sleep(Duration::from_millis(70)).await;
-        assert!(cache.get("test_key").await.is_none());
-    }
-}

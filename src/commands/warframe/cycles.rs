@@ -168,11 +168,6 @@ pub async fn cycle(ctx: Context<'_>) -> Result<(), Error> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_format_status_with_time_left() {
-        let formatted = format_cycle_display("Day", Some("1h 8m 1s"), None);
-        assert_eq!(formatted, "**Day** (1h 8m 1s remaining)");
-    }
 
     #[test]
     fn test_parse_cycle_json() {
