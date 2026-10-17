@@ -9,7 +9,7 @@ use std::collections::HashSet;
 
 use std::sync::Arc;
 
-use super::types::{RelicResponse, RelicSearchQuery, RelicState, RelicTier, RELIC_STATES};
+use super::types::{RELIC_STATES, RelicResponse, RelicSearchQuery, RelicState, RelicTier};
 
 type RelicEntry = (String, Vec<FoundRelic>);
 
@@ -74,7 +74,10 @@ fn collect_item_suggestions(relics: &RelicResponse, partial: &str) -> Vec<String
     suggestions
 }
 
-async fn relic_item_autocomplete(ctx: Context<'_>, partial: &str) -> serenity::CreateAutocompleteResponse {
+async fn relic_item_autocomplete(
+    ctx: Context<'_>,
+    partial: &str,
+) -> serenity::CreateAutocompleteResponse {
     let relics = match fetch_relics(&ctx).await {
         Ok(relics) => relics,
         Err(_) => return serenity::CreateAutocompleteResponse::new(),
@@ -303,9 +306,9 @@ async fn handle_set_query(
     }
 
     let mission_api = fetch_mission_rewards(&ctx).await.ok();
-    let overlap_summary = mission_api.as_deref().map(|api| {
-        format_set_overlapping_missions(api, &set_relic_names, 4)
-    });
+    let overlap_summary = mission_api
+        .as_deref()
+        .map(|api| format_set_overlapping_missions(api, &set_relic_names, 4));
 
     let embeds = create_set_embeds(set_name, &part_groups, overlap_summary.as_deref());
     send_embeds(ctx, embeds).await
@@ -364,8 +367,8 @@ pub async fn lookup(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::{Relic, RelicReward};
+    use super::*;
 
     #[test]
     fn test_extract_prime_set_name() {

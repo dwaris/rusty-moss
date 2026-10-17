@@ -19,17 +19,9 @@ const DEFAULT_PREFIX: &str = "~";
 use std::any::Any;
 use std::sync::Arc;
 
-#[derive(Clone)]
-pub struct CachedItem {
-    pub(crate) fetched_at: Instant,
-    pub(crate) data: Arc<dyn Any + Send + Sync>,
-}
-
 pub struct BotData {
     pub(crate) http_client: reqwest::Client,
-    pub(crate) warframe_cache: RwLock<HashMap<String, CachedItem>>,
-    pub(crate) warframe_cache_ttl: Duration,
-    pub(crate) relic_names_cache: RwLock<Option<(Instant, Arc<[String]>)>>,
+    pub(crate) warframe_cache: moka::future::Cache<String, Arc<dyn Any + Send + Sync>>,
     // UserID -> Stop Signal Sender
     pub(crate) active_animations:
         RwLock<HashMap<serenity::UserId, tokio::sync::watch::Sender<bool>>>,
@@ -41,11 +33,14 @@ fn build_bot_data() -> Result<BotData, Error> {
         .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
         .build()?;
 
+    let warframe_cache = moka::future::Cache::builder()
+        .max_capacity(200)
+        .time_to_live(Duration::from_secs(WARFRAME_CACHE_TTL_SECS))
+        .build();
+
     Ok(BotData {
         http_client,
-        warframe_cache: RwLock::new(HashMap::new()),
-        warframe_cache_ttl: Duration::from_secs(WARFRAME_CACHE_TTL_SECS),
-        relic_names_cache: RwLock::new(None),
+        warframe_cache,
         active_animations: RwLock::new(HashMap::new()),
         start_time: Instant::now(),
     })

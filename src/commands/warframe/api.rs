@@ -1,25 +1,15 @@
 use crate::{Context, Error};
 use serde::de::DeserializeOwned;
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
-
-pub fn prune_cache(cache: &mut HashMap<String, crate::CachedItem>, ttl: Duration) {
-    cache.retain(|_, v| v.fetched_at.elapsed() <= ttl);
-}
 
 pub async fn get_cached_json<T: DeserializeOwned + Send + Sync + 'static>(
     ctx: &Context<'_>,
     url: &str,
 ) -> Result<Arc<T>, Error> {
+    if let Some(cached) = ctx.data().warframe_cache.get(url).await
+        && let Ok(val) = cached.downcast::<T>()
     {
-        let cache = ctx.data().warframe_cache.read().await;
-        if let Some(cached) = cache.get(url)
-            && cached.fetched_at.elapsed() <= ctx.data().warframe_cache_ttl
-            && let Ok(val) = cached.data.clone().downcast::<T>()
-        {
-            return Ok(val);
-        }
+        return Ok(val);
     }
 
     let response = ctx.data().http_client.get(url).send().await?;
@@ -38,19 +28,10 @@ pub async fn get_cached_json<T: DeserializeOwned + Send + Sync + 'static>(
     })?;
     let data = Arc::new(parsed);
 
-    {
-        let mut cache = ctx.data().warframe_cache.write().await;
-        let ttl = ctx.data().warframe_cache_ttl;
-        prune_cache(&mut cache, ttl);
-
-        cache.insert(
-            url.to_string(),
-            crate::CachedItem {
-                fetched_at: std::time::Instant::now(),
-                data: data.clone(),
-            },
-        );
-    }
+    ctx.data()
+        .warframe_cache
+        .insert(url.to_string(), data.clone())
+        .await;
 
     Ok(data)
 }
@@ -58,33 +39,26 @@ pub async fn get_cached_json<T: DeserializeOwned + Send + Sync + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
+    use std::any::Any;
+    use std::time::Duration;
 
-    #[test]
-    fn test_prune_cache_removes_expired_entries() {
-        let mut cache = HashMap::new();
-        let ttl = Duration::from_secs(10);
+    #[tokio::test]
+    async fn test_moka_cache_downcast_and_expiry() {
+        let cache: moka::future::Cache<String, Arc<dyn Any + Send + Sync>> =
+            moka::future::Cache::builder()
+                .time_to_live(Duration::from_millis(50))
+                .build();
 
-        cache.insert(
-            "https://api.example.com/fresh".to_string(),
-            crate::CachedItem {
-                fetched_at: Instant::now(),
-                data: Arc::new("fresh".to_string()),
-            },
-        );
+        let value = Arc::new("cached test payload".to_string());
+        cache.insert("test_key".to_string(), value).await;
 
-        cache.insert(
-            "https://api.example.com/expired".to_string(),
-            crate::CachedItem {
-                fetched_at: Instant::now() - Duration::from_secs(20),
-                data: Arc::new("expired".to_string()),
-            },
-        );
+        let retrieved = cache.get("test_key").await.expect("Key should exist");
+        let downcasted = retrieved
+            .downcast::<String>()
+            .expect("Downcast must succeed");
+        assert_eq!(&*downcasted, "cached test payload");
 
-        prune_cache(&mut cache, ttl);
-
-        assert!(cache.contains_key("https://api.example.com/fresh"));
-        assert!(!cache.contains_key("https://api.example.com/expired"));
-        assert_eq!(cache.len(), 1);
+        tokio::time::sleep(Duration::from_millis(70)).await;
+        assert!(cache.get("test_key").await.is_none());
     }
 }

@@ -5,7 +5,7 @@ use poise::serenity_prelude as serenity;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::types::{
     MissionApiResponse, MissionData, MissionDrops, MissionReward, MissionRewards, RelicTier,
@@ -189,19 +189,18 @@ fn collect_relic_name_suggestions(api_response: &MissionApiResponse) -> Vec<Stri
     suggestions
 }
 
-async fn farm_relic_autocomplete(ctx: Context<'_>, partial: &str) -> serenity::CreateAutocompleteResponse {
-    let cached = {
-        let cache = ctx.data().relic_names_cache.read().await;
-        if let Some((instant, names)) = &*cache {
-            if instant.elapsed() < ctx.data().warframe_cache_ttl {
-                Some(names.clone())
-            } else {
-                None
-            }
+async fn farm_relic_autocomplete(
+    ctx: Context<'_>,
+    partial: &str,
+) -> serenity::CreateAutocompleteResponse {
+    const RELIC_NAMES_KEY: &str = "warframe:relic_names";
+
+    let cached: Option<Arc<Vec<String>>> =
+        if let Some(cached) = ctx.data().warframe_cache.get(RELIC_NAMES_KEY).await {
+            cached.downcast::<Vec<String>>().ok()
         } else {
             None
-        }
-    };
+        };
 
     let names = if let Some(names) = cached {
         names
@@ -210,9 +209,11 @@ async fn farm_relic_autocomplete(ctx: Context<'_>, partial: &str) -> serenity::C
             Ok(response) => response,
             Err(_) => return serenity::CreateAutocompleteResponse::new(),
         };
-        let names: Arc<[String]> = collect_relic_name_suggestions(&api_response).into();
-        let mut cache = ctx.data().relic_names_cache.write().await;
-        *cache = Some((Instant::now(), names.clone()));
+        let names: Arc<Vec<String>> = Arc::new(collect_relic_name_suggestions(&api_response));
+        ctx.data()
+            .warframe_cache
+            .insert(RELIC_NAMES_KEY.to_string(), names.clone())
+            .await;
         names
     };
 
@@ -284,11 +285,14 @@ fn group_and_sort_missions(found_drops: Vec<FoundDrop>) -> Vec<MissionDrops> {
 
     for drop in found_drops {
         let mission_label = format!("{} ({})", drop.mission_path, drop.game_mode);
-        mission_map.entry(mission_label).or_default().push(RotationDrop {
-            rotation: drop.rotation,
-            rarity: drop.rarity,
-            chance: drop.chance,
-        });
+        mission_map
+            .entry(mission_label)
+            .or_default()
+            .push(RotationDrop {
+                rotation: drop.rotation,
+                rarity: drop.rarity,
+                chance: drop.chance,
+            });
     }
 
     for drops in mission_map.values_mut() {
@@ -670,4 +674,3 @@ mod tests {
         assert_eq!(matches_axi, vec!["Axi A11", "Axi A21"]);
     }
 }
-

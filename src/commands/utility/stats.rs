@@ -55,4 +55,3 @@ pub async fn stats(
 
     Ok(())
 }
-

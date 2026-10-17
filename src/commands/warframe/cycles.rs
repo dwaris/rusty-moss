@@ -214,4 +214,3 @@ mod tests {
         assert_eq!(duviri.phase_name(), "Fear");
     }
 }
-
