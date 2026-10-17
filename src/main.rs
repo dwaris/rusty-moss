@@ -3,7 +3,6 @@ mod tasks;
 use commands::{fun, utility, warframe};
 
 use dotenvy::dotenv;
-use env_logger::Env;
 use poise::serenity_prelude as serenity;
 use std::collections::HashMap;
 use std::env;
@@ -68,18 +67,18 @@ fn build_framework_options() -> poise::FrameworkOptions<BotData, Error> {
         on_error: |error| Box::pin(on_error(error)),
         pre_command: |ctx| {
             Box::pin(async move {
-                log::info!("Executing command {}...", ctx.command().qualified_name);
+                tracing::info!("Executing command {}...", ctx.command().qualified_name);
             })
         },
         post_command: |ctx| {
             Box::pin(async move {
-                log::info!("Executed command {}!", ctx.command().qualified_name);
+                tracing::info!("Executed command {}!", ctx.command().qualified_name);
             })
         },
         skip_checks_for_owners: false,
         event_handler: |_ctx, event| {
             Box::pin(async move {
-                log::trace!(
+                tracing::trace!(
                     "Got an event in event handler: {:?}",
                     event.snake_case_name()
                 );
@@ -94,7 +93,7 @@ fn build_framework() -> poise::Framework<BotData, Error> {
     poise::Framework::builder()
         .setup(move |ctx, ready, framework| {
             Box::pin(async move {
-                log::info!("Logged in as {}", ready.user.name);
+                tracing::info!("Logged in as {}", ready.user.name);
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
 
                 let data = build_bot_data()?;
@@ -120,7 +119,7 @@ async fn on_error(error: poise::FrameworkError<'_, BotData, Error>) {
     match error {
         poise::FrameworkError::Setup { error, .. } => panic!("Failed to start bot: {:?}", error),
         poise::FrameworkError::Command { error, ctx, .. } => {
-            log::error!("Error in command `{}`: {:?}", ctx.command().name, error);
+            tracing::error!("Error in command `{}`: {:?}", ctx.command().name, error);
             let _ = ctx.say(format!("An error occurred: {}", error)).await;
         }
         poise::FrameworkError::CooldownHit {
@@ -138,7 +137,7 @@ async fn on_error(error: poise::FrameworkError<'_, BotData, Error>) {
         }
         error => {
             if let Err(e) = poise::builtins::on_error(error).await {
-                log::error!("Error while handling framework error: {}", e);
+                tracing::error!("Error while handling framework error: {}", e);
             }
         }
     }
@@ -147,7 +146,12 @@ async fn on_error(error: poise::FrameworkError<'_, BotData, Error>) {
 #[tokio::main]
 async fn main() {
     dotenv().ok();
-    env_logger::init_from_env(Env::default().filter_or("RUST_LOG", "info"));
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
 
     let framework = build_framework();
     let token = discord_token();

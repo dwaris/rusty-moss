@@ -434,7 +434,7 @@ pub async fn farm(
     let api_response = match fetch_mission_rewards(&ctx).await {
         Ok(response) => response,
         Err(e) => {
-            log::error!("Failed to fetch mission data from API: {e}");
+            tracing::error!("Failed to fetch mission data from API: {e}");
             ctx.say("Failed to fetch mission data from API").await?;
             return Ok(());
         }

@@ -396,7 +396,7 @@ pub async fn pixel(
         }
 
         if let Err(e) = message.edit(&ctx, edit).await {
-            log::warn!("Failed to edit pixel message: {}", e);
+            tracing::warn!("Failed to edit pixel message: {}", e);
             break;
         }
 

@@ -351,7 +351,7 @@ pub async fn lookup(
     let relics = match fetch_relics(&ctx).await {
         Ok(relics) => relics,
         Err(e) => {
-            log::error!("Failed to fetch relic data from API: {e}");
+            tracing::error!("Failed to fetch relic data from API: {e}");
             ctx.say("Failed to fetch relic data from API").await?;
             return Ok(());
         }

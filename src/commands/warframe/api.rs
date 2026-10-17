@@ -24,7 +24,7 @@ pub async fn get_cached_json<T: DeserializeOwned + Send + Sync + 'static>(
     }
 
     let parsed: T = response.json().await.map_err(|e| {
-        log::error!("Failed to deserialize API response from {url}: {e}");
+        tracing::error!("Failed to deserialize API response from {url}: {e}");
         WarframeError::Deserialize {
             url: url.to_string(),
             source: e,

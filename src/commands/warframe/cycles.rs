@@ -143,7 +143,7 @@ pub async fn cycle(ctx: Context<'_>) -> Result<(), Error> {
         let formatted = match result {
             Ok(c) => c.format_status(),
             Err(e) => {
-                log::warn!("Failed to fetch {} cycle: {e}", region.display_name);
+                tracing::warn!("Failed to fetch {} cycle: {e}", region.display_name);
                 "Unavailable".to_string()
             }
         };
