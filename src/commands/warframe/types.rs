@@ -1,6 +1,23 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
+#[derive(thiserror::Error, Debug)]
+pub enum WarframeError {
+    #[error("Warframe API request to {url} failed with status {status}")]
+    HttpError {
+        url: String,
+        status: reqwest::StatusCode,
+    },
+    #[error("Warframe API request network failure: {0}")]
+    Network(#[from] reqwest::Error),
+    #[error("Failed to deserialize Warframe API response from {url}: {source}")]
+    Deserialize {
+        url: String,
+        #[source]
+        source: reqwest::Error,
+    },
+}
+
 // --- RELIC LOOKUP TYPES ---
 
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
