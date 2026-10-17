@@ -496,4 +496,46 @@ mod tests {
         assert!(desc.contains("Best Overlapping Farm Spots"));
         assert!(desc.contains("Lua/Apollo (Disruption)"));
     }
+
+    #[test]
+    fn test_create_set_embeds_splits_on_discord_description_limit() {
+        // Generate enough parts and relics to force description past 3800 characters
+        let mut part_groups = Vec::new();
+        for p in 0..15 {
+            let mut relic_entries = Vec::new();
+            for r in 0..10 {
+                relic_entries.push((
+                    format!("Axi P{p}R{r}"),
+                    vec![FoundRelic {
+                        tier: RelicTier::Axi,
+                        relic_name: format!("Axi P{p}R{r}"),
+                        state: RelicState::Radiant,
+                        chance: 10.0,
+                    }],
+                ));
+            }
+            part_groups.push((
+                format!("Warframe Prime Extremely Long Named Component Part #{p}"),
+                relic_entries,
+            ));
+        }
+
+        let embeds = create_set_embeds("Warframe Prime", &part_groups, None);
+
+        // Must split into multiple embeds to respect Discord's 4096 description limit
+        assert!(
+            embeds.len() > 1,
+            "Expected embeds to split across multiple pages"
+        );
+
+        for (i, embed) in embeds.iter().enumerate() {
+            let json = serde_json::to_value(embed).unwrap();
+            let desc = json["description"].as_str().unwrap_or("");
+            assert!(
+                desc.len() <= 4000,
+                "Embed page {i} description length {} exceeded safe limit",
+                desc.len()
+            );
+        }
+    }
 }

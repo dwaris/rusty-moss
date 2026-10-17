@@ -244,4 +244,80 @@ mod tests {
         let formatted = format_set_overlapping_missions(&api_response, &targets, 5);
         assert!(formatted.contains("vaulted"));
     }
+
+    #[test]
+    fn test_find_overlapping_missions_game_mode_and_chance_tie_breaker() {
+        let targets = HashSet::from(["Lith A1".to_string(), "Neo N1".to_string()]);
+
+        // Disruption (Mars) with 10.0% total
+        let mars = MissionData {
+            game_mode: "Disruption".to_string(),
+            is_event: Some(false),
+            rewards: MissionRewards::List(vec![
+                sample_reward("Lith A1 Relic", 5.0),
+                sample_reward("Neo N1 Relic", 5.0),
+            ]),
+        };
+
+        // Disruption (Sedna) with 14.0% total
+        let sedna = MissionData {
+            game_mode: "Disruption".to_string(),
+            is_event: Some(false),
+            rewards: MissionRewards::List(vec![
+                sample_reward("Lith A1 Relic", 7.0),
+                sample_reward("Neo N1 Relic", 7.0),
+            ]),
+        };
+
+        // Capture (Void) with 15.0% total
+        let void = MissionData {
+            game_mode: "Capture".to_string(),
+            is_event: Some(false),
+            rewards: MissionRewards::List(vec![
+                sample_reward("Lith A1 Relic", 7.5),
+                sample_reward("Neo N1 Relic", 7.5),
+            ]),
+        };
+
+        // Survival (Saturn) with 25.0% total
+        let saturn = MissionData {
+            game_mode: "Survival".to_string(),
+            is_event: Some(false),
+            rewards: MissionRewards::List(vec![
+                sample_reward("Lith A1 Relic", 12.5),
+                sample_reward("Neo N1 Relic", 12.5),
+            ]),
+        };
+
+        let api_response = MissionApiResponse {
+            mission_rewards: HashMap::from([
+                (
+                    "Mars".to_string(),
+                    HashMap::from([("Olympus".to_string(), mars)]),
+                ),
+                (
+                    "Sedna".to_string(),
+                    HashMap::from([("Kappa".to_string(), sedna)]),
+                ),
+                (
+                    "Void".to_string(),
+                    HashMap::from([("Ukko".to_string(), void)]),
+                ),
+                (
+                    "Saturn".to_string(),
+                    HashMap::from([("Titan".to_string(), saturn)]),
+                ),
+            ]),
+        };
+
+        let overlaps = find_overlapping_missions(&api_response, &targets);
+        assert_eq!(overlaps.len(), 4);
+
+        // Sedna Disruption (rank 0, 14%) > Mars Disruption (rank 0, 10%)
+        assert_eq!(overlaps[0].mission_label, "Sedna/Kappa (Disruption)");
+        assert_eq!(overlaps[1].mission_label, "Mars/Olympus (Disruption)");
+        // Capture (rank 1, 15%) > Survival (rank 4, 25%) despite lower raw chance
+        assert_eq!(overlaps[2].mission_label, "Void/Ukko (Capture)");
+        assert_eq!(overlaps[3].mission_label, "Saturn/Titan (Survival)");
+    }
 }

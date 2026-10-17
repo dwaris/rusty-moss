@@ -219,10 +219,41 @@ mod tests {
             Some("Ash Prime".to_string())
         );
         assert_eq!(
+            parse_prime_set_query("  Ash    Prime    Set  "),
+            Some("Ash Prime".to_string())
+        );
+        assert_eq!(
+            parse_prime_set_query("ash prime set"),
+            Some("ash prime".to_string())
+        );
+        assert_eq!(
             parse_prime_set_query("Ash Prime"),
             Some("Ash Prime".to_string())
         );
+        // Components should NOT parse as prime sets
+        assert_eq!(parse_prime_set_query("Ash Prime Systems"), None);
+        assert_eq!(parse_prime_set_query("Braton Prime Barrel"), None);
+        // Invalid or incomplete queries
         assert_eq!(parse_prime_set_query("Ash"), None);
         assert_eq!(parse_prime_set_query("Prime Set"), None);
+        assert_eq!(parse_prime_set_query("Prime"), None);
+        assert_eq!(parse_prime_set_query(""), None);
+        assert_eq!(parse_prime_set_query("   "), None);
+    }
+
+    #[test]
+    fn test_relic_search_query_routing() {
+        assert_eq!(
+            RelicSearchQuery::parse("  Karyst   Prime   Set "),
+            RelicSearchQuery::PrimeSet("Karyst Prime".to_string())
+        );
+        assert_eq!(
+            RelicSearchQuery::parse("Karyst Prime Blade"),
+            RelicSearchQuery::SpecificItem("Karyst Prime Blade".to_string())
+        );
+        assert_eq!(
+            RelicSearchQuery::parse("Forma Blueprint"),
+            RelicSearchQuery::SpecificItem("Forma Blueprint".to_string())
+        );
     }
 }

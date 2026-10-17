@@ -39,5 +39,3 @@ pub async fn get_cached_json<T: DeserializeOwned + Send + Sync + 'static>(
 
     Ok(data)
 }
-
-

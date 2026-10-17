@@ -448,5 +448,3 @@ pub async fn pixel(
 
     Ok(())
 }
-
-

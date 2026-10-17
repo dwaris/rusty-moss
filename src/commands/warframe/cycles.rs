@@ -168,7 +168,6 @@ pub async fn cycle(ctx: Context<'_>) -> Result<(), Error> {
 mod tests {
     use super::*;
 
-
     #[test]
     fn test_parse_cycle_json() {
         let json_data = r#"{"id":"cetus1","isDay":true,"state":"day","timeLeft":"50m 10s","expiry":"2026-09-06T20:15:00.000Z"}"#;
