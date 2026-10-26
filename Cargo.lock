@@ -2071,9 +2071,9 @@ checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
 name = "typesize"
-version = "0.1.15"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a313188364f7e10138257cb288c64e9b0e282510abefc91c796799559fa14762"
+checksum = "8ca31df99bb937c34111021f151f9f616055f18574f0dccf6d4f0d50843adf54"
 dependencies = [
  "chrono",
  "dashmap",
