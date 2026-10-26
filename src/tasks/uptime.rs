@@ -57,6 +57,8 @@ pub fn start_uptime_loop(ctx: serenity::Context, http_client: reqwest::Client) {
             return;
         }
 
+        let mut last_status: Option<&'static str> = None;
+
         loop {
             match http_client.get(&upptime_url).send().await {
                 Ok(response) => match response.json::<UpptimeResponse>().await {
@@ -69,15 +71,21 @@ pub fn start_uptime_loop(ctx: serenity::Context, http_client: reqwest::Client) {
                             "🔴 Some systems offline"
                         };
 
-                        tracing::info!("Setting bot status to: {}", status_text);
+                        if last_status != Some(status_text) {
+                            tracing::info!("Uptime status changed to: {}", status_text);
+                            last_status = Some(status_text);
+                        } else {
+                            tracing::debug!("Setting bot status to: {}", status_text);
+                        }
+
                         ctx.set_activity(Some(serenity::ActivityData::custom(status_text)));
                     }
                     Err(e) => {
-                        tracing::error!("Failed to parse Upptime JSON: {}", e);
+                        tracing::warn!("Failed to parse Upptime JSON: {}", e);
                     }
                 },
                 Err(e) => {
-                    tracing::error!("Failed to fetch upptime status: {}", e);
+                    tracing::warn!("Failed to fetch upptime status: {}", e);
                 }
             }
 

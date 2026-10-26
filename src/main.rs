@@ -67,7 +67,7 @@ fn build_framework_options() -> poise::FrameworkOptions<BotData, Error> {
         on_error: |error| Box::pin(on_error(error)),
         pre_command: |ctx| {
             Box::pin(async move {
-                tracing::info!("Executing command {}...", ctx.command().qualified_name);
+                tracing::debug!("Executing command {}...", ctx.command().qualified_name);
             })
         },
         post_command: |ctx| {
@@ -146,12 +146,20 @@ async fn on_error(error: poise::FrameworkError<'_, BotData, Error>) {
 #[tokio::main]
 async fn main() {
     dotenv().ok();
+
+    let env_filter = match env::var("RUST_LOG") {
+        Ok(ref val) if !val.trim().is_empty() => tracing_subscriber::EnvFilter::builder()
+            .with_default_directive(tracing_subscriber::filter::LevelFilter::INFO.into())
+            .parse_lossy(val),
+        _ => tracing_subscriber::EnvFilter::new("info"),
+    };
+
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
+        .with_env_filter(env_filter)
+        .with_writer(std::io::stderr)
         .init();
+
+    tracing::info!("Starting rusty-moss v{}...", env!("CARGO_PKG_VERSION"));
 
     let framework = build_framework();
     let token = discord_token();
