@@ -1,8 +1,46 @@
 use crate::{Context, Error};
 use poise::serenity_prelude as serenity;
-use rand::RngExt;
 use std::time::Duration;
 use tokio::time::sleep;
+
+struct SimpleRng(u64);
+
+impl SimpleRng {
+    fn new() -> Self {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let seed = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x853c49e6748fea9b);
+        Self(if seed == 0 { 0x853c49e6748fea9b } else { seed })
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545F4914F6CDD1D)
+    }
+
+    fn range_usize(&mut self, min: usize, max: usize) -> usize {
+        if min >= max {
+            return min;
+        }
+        min + (self.next_u64() as usize % (max - min))
+    }
+
+    fn range_u8_inclusive(&mut self, min: u8, max: u8) -> u8 {
+        if min >= max {
+            return min;
+        }
+        min + (self.next_u64() as u8 % (max - min + 1))
+    }
+
+    fn range_f64(&mut self, min: f64, max: f64) -> f64 {
+        let frac = (self.next_u64() as f64) / (u64::MAX as f64);
+        min + frac * (max - min)
+    }
+}
 
 const WIDTH: usize = 24;
 const HEIGHT: usize = 7;
@@ -115,7 +153,7 @@ fn render_matrix(frame: usize, drops: &mut [usize]) -> String {
 
 // --- ANIMATION: FIRE ---
 fn render_fire(_frame: usize, fire_buffer: &mut [Vec<f64>]) -> String {
-    let mut rng = rand::rng();
+    let mut rng = SimpleRng::new();
     for y in 0..HEIGHT - 1 {
         for x in 0..WIDTH {
             let left = if x > 0 {
@@ -130,13 +168,13 @@ fn render_fire(_frame: usize, fire_buffer: &mut [Vec<f64>]) -> String {
             };
             let mid = fire_buffer[y + 1][x];
 
-            let cooling = rng.random_range(0.0..0.12);
+            let cooling = rng.range_f64(0.0, 0.12);
             fire_buffer[y][x] = ((left + right + mid) / 3.0 - cooling).clamp(0.0, 1.0);
         }
     }
 
     for cell in &mut fire_buffer[HEIGHT - 1] {
-        let fuel = rng.random_range(0.4..1.0);
+        let fuel = rng.range_f64(0.4, 1.0);
         *cell = fuel;
     }
 
@@ -245,6 +283,7 @@ fn render_dvd(frame: usize, offset_x: usize, offset_y: usize) -> String {
 
 // --- ANIMATION: STARFIELD ---
 fn render_starfield(_frame: usize, stars: &mut [Particle]) -> String {
+    let mut rng = SimpleRng::new();
     let mut buffer = vec![vec![PixelCell::blank(); WIDTH]; HEIGHT];
 
     for star in stars.iter_mut() {
@@ -252,7 +291,7 @@ fn render_starfield(_frame: usize, stars: &mut [Particle]) -> String {
 
         if star.x < step {
             star.x = WIDTH - 1;
-            star.y = rand::random_range(0..HEIGHT);
+            star.y = rng.range_usize(0, HEIGHT);
         } else {
             star.x -= step;
         }
@@ -320,30 +359,30 @@ pub async fn pixel(
     }
 
     let (mut drops, mut fire_buffer, offset_x, offset_y, mut stars, mut rain_drops) = {
-        let mut rng = rand::rng();
+        let mut rng = SimpleRng::new();
 
         let mut drops = vec![0; WIDTH];
         for drop in &mut drops {
-            *drop = rng.random_range(0..HEIGHT);
+            *drop = rng.range_usize(0, HEIGHT);
         }
 
         let fire_buffer = vec![vec![0.0; WIDTH]; HEIGHT];
-        let offset_x = rng.random_range(0..15);
-        let offset_y = rng.random_range(0..5);
+        let offset_x = rng.range_usize(0, 15);
+        let offset_y = rng.range_usize(0, 5);
 
         let stars: Vec<Particle> = (0..16)
             .map(|_| Particle {
-                x: rng.random_range(0..WIDTH),
-                y: rng.random_range(0..HEIGHT),
-                speed: rng.random_range(1..=2),
+                x: rng.range_usize(0, WIDTH),
+                y: rng.range_usize(0, HEIGHT),
+                speed: rng.range_u8_inclusive(1, 2),
             })
             .collect();
 
         let rain_drops: Vec<Particle> = (0..16)
             .map(|_| Particle {
-                x: rng.random_range(0..WIDTH),
-                y: rng.random_range(0..HEIGHT),
-                speed: rng.random_range(1..=2),
+                x: rng.range_usize(0, WIDTH),
+                y: rng.range_usize(0, HEIGHT),
+                speed: rng.range_u8_inclusive(1, 2),
             })
             .collect();
 

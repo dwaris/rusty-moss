@@ -1,21 +1,53 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
-#[derive(thiserror::Error, Debug)]
+#[derive(Debug)]
 pub enum WarframeError {
-    #[error("Warframe API request to {url} failed with status {status}")]
     HttpError {
         url: String,
         status: reqwest::StatusCode,
     },
-    #[error("Warframe API request network failure: {0}")]
-    Network(#[from] reqwest::Error),
-    #[error("Failed to deserialize Warframe API response from {url}: {source}")]
+    Network(reqwest::Error),
     Deserialize {
         url: String,
-        #[source]
         source: reqwest::Error,
     },
+}
+
+impl std::fmt::Display for WarframeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HttpError { url, status } => {
+                write!(
+                    f,
+                    "Warframe API request to {url} failed with status {status}"
+                )
+            }
+            Self::Network(err) => write!(f, "Warframe API request network failure: {err}"),
+            Self::Deserialize { url, source } => {
+                write!(
+                    f,
+                    "Failed to deserialize Warframe API response from {url}: {source}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for WarframeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Network(err) => Some(err),
+            Self::Deserialize { source, .. } => Some(source),
+            Self::HttpError { .. } => None,
+        }
+    }
+}
+
+impl From<reqwest::Error> for WarframeError {
+    fn from(err: reqwest::Error) -> Self {
+        Self::Network(err)
+    }
 }
 
 // --- RELIC LOOKUP TYPES ---
